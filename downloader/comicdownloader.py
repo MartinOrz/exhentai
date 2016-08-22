@@ -1087,6 +1087,11 @@ def find_authors(root_path, member_id, pass_hash):
                     log(2, '获取信息出现问题:', e)
 
 
+def getTestPkl():
+    test = os.path.join(os.path.dirname(os.getcwd()), 'data', 'test.pkl')
+    return test
+
+
 if __name__ == '__main__':
     # memberId, passHash = connect_to_exhentai('mdlovewho', 'ma199141')
     memberId = '2631394'
@@ -1095,8 +1100,8 @@ if __name__ == '__main__':
     log(0, '连接e绅士成功!')
     clean_dir(r'd:\bbb')
     # find_undone_imgs(r'd:\bbb')
-    # # # # # # # # # # #
-    with open(r'd:\test.pkl', 'rb') as ff:
+    # # # # # # # # # # # #
+    with open(getTestPkl(), 'rb') as ff:
         fileList = pickle.load(ff)
 
     log(0, '本次下载共', len(fileList), '个任务')

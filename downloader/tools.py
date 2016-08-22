@@ -3,6 +3,7 @@ __author__ = 'v_mading'
 
 import math
 import pickle
+import os
 
 def getInput():
     result = []
@@ -49,13 +50,18 @@ def resort(result):
     return result
 
 
+def getTest():
+    test = os.path.join(os.path.dirname(os.getcwd()), 'data', 'test.pkl')
+    return test
+
+
 def read():
-    with open(r'd:\test.pkl', 'rb') as file:
+    with open(getTest(), 'rb') as file:
         return pickle.load(file)
 
 
 def save(result):
-    with open(r'd:\test.pkl', 'wb') as file:
+    with open(getTest(), 'wb') as file:
         pickle.dump(result, file)
 
 # def reverse(line):
