@@ -24,29 +24,27 @@ def scan(src, dst):
 
 def get_path(dst, dic):
     if dic['type'] == 'cosplay':
-        return os.path.join(dst, 'cos', dic['name'])
+        return os.path.join(dst, 'cos', dic['name'] + '.zip')
     if dic['is_anthology']:
         return os.path.join(dst, 'anthology', dic['name'])
     if dic['type'] == 'artistcg' or dic['type'] == 'gamecg':
         if dic['group'] != 'none':
-            author = dic['group']
+            return os.path.join(dst, 'cg', 'groups', dic['group'], dic['name'] + '.zip')
         elif dic['artist']:
-            author = dic['artist'][0]
+            return os.path.join(dst, 'cg', 'artists', dic['artist'][0], dic['name'] + '.zip')
         else:
-            print(dic['name'])
             return None
-        return os.path.join(dst, 'cg', author, dic['name'])
     if dic['type'] == 'western':
         if not dic['artist']:
             return None
-        return os.path.join(dst, 'western', dic['artist'][0], dic['name'])
+        return os.path.join(dst, 'western', 'artists', dic['artist'][0], dic['name'] + '.zip')
     if dic['type'] == 'misc':
-        return os.path.join(dst, 'misc', dic['name'])
+        return os.path.join(dst, 'misc', dic['name'] + '.zip')
     if dic['group'] and dic['group'] != 'none':
-        return os.path.join(dst, 'groups', dic['group'], dic['name'])
+        return os.path.join(dst, 'manga', 'groups', dic['group'], dic['name'] + '.zip')
     if not dic['artist']:
         return None
-    return os.path.join(dst, 'artists', dic['artist'][0], dic['name'])
+    return os.path.join(dst, 'manga', 'artists', dic['artist'][0], dic['name'] + '.zip')
 
 
 def zip(path):
@@ -104,19 +102,49 @@ def save_authors(root_path):
             file.write(art + "\t\n")
 
 
-def renames(root, dst):
-    for root, dirs, files in os.walk(root):
+def renames(root_dir, dst):
+    for root, dirs, files in os.walk(root_dir):
         for file in files:
-            if not os.path.exists(os.path.join(dst, file)):
-                os.renames(os.path.join(root, file), os.path.join(dst, file))
+            if file.endswith('zip'):
+                zip_file = zipfile.ZipFile(os.path.join(root, file), "r")
+                gall = None
+                for name in zip_file.namelist():
+                    if name == 'gallery.dic':
+                        gall = pickle.loads(zip_file.read(name), encoding='utf-8')
+                zip_file.close()
+                if gall:
+                    path = get_path(dst, gall)
+                    if path:
+                        try:
+                            os.renames(os.path.join(root, file), path)
+                        except:
+                            print('fail!')
 
 
+
+def findInvalidZips(root_dir, dst):
+    for root, dirs, files in os.walk(root_dir):
+        for file in files:
+            if file.endswith('zip'):
+                zip_file = zipfile.ZipFile(os.path.join(root, file), "r")
+                for name in zip_file.namelist():
+                    length = len(zip_file.read(name))
+                    if name.endswith('gif') or length < 10 or length in [142, 143] or name == 'undone.pkl':
+                        zip_file.close()
+                        os.renames(os.path.join(root, file), os.path.join(dst, file))
+                        break
 
 
 if __name__ == '__main__':
-    # renames(r'e:\comic', r'e:\new')
-    clear_gif(r'd:\bbb')
-    # scan(r'd:\bbb', r'd:\kkk')
-    zipAll(r'd:\bbb')
-    # path = r'E:\comic'
-    # save_authors(path)
+    # # renames(r'e:\comic', r'e:\new')
+    # clear_gif(r'd:\bbb')
+    # # scan(r'd:\bbb', r'd:\kkk')
+    # zipAll(r'd:\bbb')
+    # # path = r'E:\comic'
+    # # save_authors(path)
+
+    # renames(r'e:\new', r'e:\comic')
+    for root, dirs, files in os.walk(r'E:\comic\anthology'):
+        for file in files:
+            if not file.endswith('zip'):
+                os.renames(os.path.join(root, file), os.path.join(root, file + '.zip'))
