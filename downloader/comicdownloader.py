@@ -1057,7 +1057,12 @@ def find_undone_imgs(root_path):
                     if size == 0 or size == 142:
                         undones.append(img)
             if len(undones) > 0:
-                os.renames(os.path.join(root_path, dir), os.path.join(r'd:\undone', dir))
+                os.renames(os.path.join(root_path, dir), os.path.join(r'g:\undone', dir))
+            else: #是完全的
+                pkl = os.path.join(root_path, dir, 'undone.pkl')
+                if os.path.exists(pkl):
+                    os.remove(pkl)
+
 
 
 def find_authors(root_path, member_id, pass_hash):
@@ -1091,6 +1096,14 @@ def getTestPkl():
     test = os.path.join(os.path.dirname(os.getcwd()), 'data', 'test.pkl')
     return test
 
+def findGalls(root_path):
+    for root, dirs, files in os.walk(root_path):
+        for file in files:
+            if file.endswith('dic'):
+                with open(os.path.join(root, file), 'rb') as f:
+                    gallery_dic = pickle.load(f)
+                print(gallery_dic['root_path'])
+
 
 if __name__ == '__main__':
     # memberId, passHash = connect_to_exhentai('mdlovewho', 'ma199141')
@@ -1098,29 +1111,30 @@ if __name__ == '__main__':
     passHash = '77ded0c31e820ed60d11e6ca9b458c72'
 
     log(0, '连接e绅士成功!')
-    clean_dir(r'd:\bbb')
-    # find_undone_imgs(r'd:\bbb')
-    # # # # # # # # # # # #
-    with open(getTestPkl(), 'rb') as ff:
-        fileList = pickle.load(ff)
-
-    log(0, '本次下载共', len(fileList), '个任务')
-    i = 0
-    for line in fileList:
-        line = line[0]
-        log(0, "任务地址: ", line)
-        i += 1
-        gallery = Gallery(line, memberId, passHash)
-        content = gallery.analysis_pages()
-        gallery.get_all_imgs(content)
-        log(0, '任务', i, '分析画集结束！')
-        dispatcher = Dispatcher(gallery, r'd:\bbb', 5, memberId, passHash)
-        dispatcher.start()
-
-        while not dispatcher.done:
-            time.sleep(10)
+    # findGalls(r'g:\undone')
+    clean_dir(r'g:\undone')
+    find_undone_imgs(r'g:\invalid')
+    # # # # # # # # # # # # #
+    # with open(r'd:\test.pkl', 'rb') as ff:
+    #     fileList = pickle.load(ff)
+    #
+    # log(0, '本次下载共', len(fileList), '个任务')
+    # i = 0
+    # for line in fileList:
+    #     line = line[0]
+    #     log(0, "任务地址: ", line)
+    #     i += 1
+    #     gallery = Gallery(line, memberId, passHash)
+    #     content = gallery.analysis_pages()
+    #     gallery.get_all_imgs(content)
+    #     log(0, '任务', i, '分析画集结束！')
+    #     dispatcher = Dispatcher(gallery, r'G:\undone', 5, memberId, passHash)
+    #     dispatcher.start()
+    #
+    #     while not dispatcher.done:
+    #         time.sleep(10)
     # #
-    # scavenger = Scavenger(r'D:\bbb', memberId, passHash)
+    # scavenger = Scavenger(r'g:\undone', memberId, passHash)
     # scavenger.start()
 
     # find_authors(r'd:\bbb', memberId, passHash)

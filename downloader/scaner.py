@@ -135,6 +135,35 @@ def findInvalidZips(root_dir, dst):
                         break
 
 
+def findAuthours(root_path):
+    groups = {}
+    gl = []
+    authors = {}
+    al = []
+    for root, dirs, files in os.walk(root_path):
+        for file in files:
+            if file.endswith('zip'):
+                zip_file = zipfile.ZipFile(os.path.join(root, file), "r")
+                for name in zip_file.namelist():
+                    length = len(zip_file.read(name))
+                    if name == 'gallery.dic':
+                        gall = pickle.loads(zip_file.read(name), encoding='utf-8')
+                        if gall['group'] not in groups:
+                            groups[gall['group']] = gall['root_path']
+                            gl.append(gall['group'])
+                        for a in gall['artist']:
+                            if a not in authors:
+                                authors[a] = gall['root_path']
+                                al.append(a)
+    with open(r'd:\groups', 'w', encoding='utf-8') as file:
+        for g in gl:
+            file.write(g + ' ' + groups[g] + '\n')
+    with open(r'd:\artists', 'w', encoding='utf-8') as file:
+        for a in al:
+            file.write(a + ' ' + authors[a] + '\n')
+
+
+
 if __name__ == '__main__':
     # # renames(r'e:\comic', r'e:\new')
     # clear_gif(r'd:\bbb')
@@ -143,8 +172,9 @@ if __name__ == '__main__':
     # # path = r'E:\comic'
     # # save_authors(path)
 
-    # renames(r'e:\new', r'e:\comic')
-    for root, dirs, files in os.walk(r'E:\comic\anthology'):
-        for file in files:
-            if not file.endswith('zip'):
-                os.renames(os.path.join(root, file), os.path.join(root, file + '.zip'))
+    findAuthours(r'G:\comic\manga')
+    # renames(r'g:\noname', r'g:\coo')
+    # for root, dirs, files in os.walk(r'E:\comic\anthology'):
+    #     for file in files:
+    #         if not file.endswith('zip'):
+    #             os.renames(os.path.join(root, file), os.path.join(root, file + '.zip'))
