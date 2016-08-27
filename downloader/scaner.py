@@ -135,16 +135,51 @@ def findInvalidZips(root_dir, dst):
                         break
 
 
+def getGroupsAndAuthors(root_path):
+    artists = {}
+    groups = {}
+
+    al = []
+    gl = []
+
+    done = 0
+    for root, dirs, files in os.walk(root_path):
+        for file in files:
+            if file.endswith('zip'):
+                zip_file = zipfile.ZipFile(os.path.join(root, file), "r")
+                for name in zip_file.namelist():
+                    if name == 'gallery.dic':
+                        gall = pickle.loads(zip_file.read(name), encoding='utf-8')
+                        zip_file.close()
+                        if gall['group'] not in groups:
+                            gl.append(gall['group'])
+                            groups[gall['group']] = gall['root_path']
+                        for a in gall['artist']:
+                            if a not in artists:
+                                al.append(a)
+                                artists[a] = gall['root_path']
+            done += 1
+            print('Get author info done: ', done)
+    with open(r'd:\group', 'w', encoding='utf-8') as file:
+        for g in gl:
+            file.write(g + " " + groups[g] + "\n")
+    with open(r'd:\artist', 'w', encoding='utf-8') as file:
+        for a in al:
+            file.write(a + " " + artists[a] + "\n")
+
+
 if __name__ == '__main__':
     # # renames(r'e:\comic', r'e:\new')
     # clear_gif(r'd:\bbb')
     # # scan(r'd:\bbb', r'd:\kkk')
-    # zipAll(r'd:\bbb')
+    zipAll(r'd:\bbb')
     # # path = r'E:\comic'
     # # save_authors(path)
 
+    # getGroupsAndAuthors(r'E:\comic\western')
+
     # renames(r'e:\new', r'e:\comic')
-    for root, dirs, files in os.walk(r'E:\comic\anthology'):
-        for file in files:
-            if not file.endswith('zip'):
-                os.renames(os.path.join(root, file), os.path.join(root, file + '.zip'))
+    # for root, dirs, files in os.walk(r'E:\comic\anthology'):
+    #     for file in files:
+    #         if not file.endswith('zip'):
+    #             os.renames(os.path.join(root, file), os.path.join(root, file + '.zip'))

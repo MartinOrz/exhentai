@@ -7,13 +7,21 @@ import zipfile
 import pickle
 from database.datas import Author
 
-create_tb_artist =  'CREATE TABLE tb_artist (' + \
-                    '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + \
-                    '  name VARCHAR(100) UNIQUE,' + \
-                    '  refer VARCHAR(100),' + \
-                    '  text VARCHAR(255),' + \
-                    '  comic_count INTEGER,' + \
-                    '  ratting INTEGER DEFAULT 50);'
+# CREATE TABLE tb_artist (
+#   id INTEGER PRIMARY KEY AUTOINCREMENT,
+#   name VARCHAR(100) UNIQUE,
+#   refer VARCHAR(100),
+#   text VARCHAR(255),
+#   comic_count INTEGER,
+#   ratting INTEGER DEFAULT 50);
+
+# CREATE TABLE tb_artist (
+#   id INTEGER PRIMARY KEY AUTOINCREMENT,
+#   name VARCHAR(100) UNIQUE,
+#   refer VARCHAR(100),
+#   text VARCHAR(255),
+#   comic_count INTEGER,
+#   ratting INTEGER DEFAULT 50);
 
 create_tb_gallery = 'CREATE TABLE tb_gallery (' + \
                     '  id INTEGER PRIMARY KEY AUTOINCREMENT,' + \
@@ -122,7 +130,7 @@ def insert(db, table, datas, columns=None):
     :param columns: 要插入的列名，为None时是插入所有列
     :return: 是否成功
     """
-    sql = 'INSERT INTO ' + table
+    sql = 'INSERT OR IGNORE INTO ' + table
     if columns:
         sql += ' ' + get_sql_with_bracket(columns)
     sql += ' VALUES '
@@ -256,4 +264,16 @@ def update_author_name(author_file, db):
 
 
 if __name__ == '__main__':
-    update_author_name(r'E:\author', r'D:\exhentai\exhentai.db')
+    with open(r'E:\comic\manga\artist', encoding='utf-8') as file:
+        lines = file.readlines()
+
+    columns = ['name']
+    inserts = []
+    for line in lines:
+        artist = line.split(' ')[0]
+        inserts.append(["'" + artist + "'"])
+        if len(inserts) >= 50:
+            insert(r'E:\comic\exhentai.db', 'tb_artist', inserts, columns)
+            inserts = []
+    if len(inserts) > 0:
+        insert(r'E:\comic\exhentai.db', 'tb_artist', inserts, columns)

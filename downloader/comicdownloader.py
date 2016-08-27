@@ -1099,26 +1099,26 @@ if __name__ == '__main__':
 
     log(0, '连接e绅士成功!')
     clean_dir(r'd:\bbb')
-    # find_undone_imgs(r'd:\bbb')
-    # # # # # # # # # # # #
-    with open(getTestPkl(), 'rb') as ff:
-        fileList = pickle.load(ff)
-
-    log(0, '本次下载共', len(fileList), '个任务')
-    i = 0
-    for line in fileList:
-        line = line[0]
-        log(0, "任务地址: ", line)
-        i += 1
-        gallery = Gallery(line, memberId, passHash)
-        content = gallery.analysis_pages()
-        gallery.get_all_imgs(content)
-        log(0, '任务', i, '分析画集结束！')
-        dispatcher = Dispatcher(gallery, r'd:\bbb', 5, memberId, passHash)
-        dispatcher.start()
-
-        while not dispatcher.done:
-            time.sleep(10)
+    find_undone_imgs(r'd:\bbb')
+    # # # # # # # # # # # # #
+    # with open(getTestPkl(), 'rb') as ff:
+    #     fileList = pickle.load(ff)
+    #
+    # log(0, '本次下载共', len(fileList), '个任务')
+    # i = 0
+    # for line in fileList:
+    #     line = line[0]
+    #     log(0, "任务地址: ", line)
+    #     i += 1
+    #     gallery = Gallery(line, memberId, passHash)
+    #     content = gallery.analysis_pages()
+    #     gallery.get_all_imgs(content)
+    #     log(0, '任务', i, '分析画集结束！')
+    #     dispatcher = Dispatcher(gallery, r'd:\bbb', 5, memberId, passHash)
+    #     dispatcher.start()
+    #
+    #     while not dispatcher.done:
+    #         time.sleep(10)
     # #
     # scavenger = Scavenger(r'D:\bbb', memberId, passHash)
     # scavenger.start()
