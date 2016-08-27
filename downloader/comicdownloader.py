@@ -1100,7 +1100,7 @@ if __name__ == '__main__':
     log(0, '连接e绅士成功!')
     clean_dir(r'd:\bbb')
     find_undone_imgs(r'd:\bbb')
-    # # # # # # # # # # # # #
+    # # # # # # # # # # # # # #
     # with open(getTestPkl(), 'rb') as ff:
     #     fileList = pickle.load(ff)
     #
