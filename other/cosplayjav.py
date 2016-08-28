@@ -6,6 +6,7 @@ import re
 import urllib.request as request
 import urllib.parse as parse
 import os
+import database.sqls as sql
 
 # CREATE TABLE tb_cosplay (
 #     id INTEGER PRIMARY KEY,
@@ -163,13 +164,55 @@ def get_all_javs_from_page(page_num, dst):
     return fails
 
 
+def read_file(path):
+    with open(path, encoding='utf-8') as file:
+        lines = file.readlines()
+
+    status = ('url', 'title', 'img', '--', 'mega', 'blank')
+    now = 0
+
+    result = []
+    for line in lines:
+        if '\n' in line:
+            line = line[:-1]
+        if status[now % len(status)] == 'url':
+            cos = CosplayJav()
+            result.append(cos)
+            cos.code, cos.url = line.split('\t')
+            now += 1
+        elif status[now % len(status)] == 'title':
+            cos.title = line
+            now += 1
+        elif status[now % len(status)] == 'img':
+            cos.img =line
+            now += 1
+        elif status[now % len(status)] == '--':
+            now += 1
+        elif status[now % len(status)] == 'mega':
+            if line.startswith('https'):
+                cos.megas.append(line)
+            else: # 此时已经是blank
+                now = 5
+                now += 1
+    return result
+
+
+def insert_cos(cos_list):
+    datas = [(cos.code, cos.title, cos.url, cos.img, 0) for cos in cos_list]
+    columns = ('id', 'name', 'url', 'img', 'status')
+    sql.insert(r'g:\cosplayjav.db', 'tb_cosplay', datas, columns)
+
 if __name__ == '__main__':
-    i = 161
+    i = 1
     while i < 239:
-        fails = get_all_javs_from_page(i, r'e:\doo')
-        with open(r'e:\doo\fail', 'a', encoding='utf-8') as file:
-            for fail in fails:
-                file.write(fail + '\n')
+        path = os.path.join(r'g:\doo', str(i))
+        # with open(path, encoding='utf-8') as file:
+        #     for line in file:
+        #         if '881' in line:
+        #             print(i)
+        #             break
+        r = read_file(path)
+        insert_cos(r)
         i += 1
     # with open(r'E:\cosplayjav.txt', encoding='utf-8') as file:
     #     lines = file.readlines()

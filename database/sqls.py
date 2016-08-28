@@ -59,8 +59,8 @@ def get_sql_with_bracket(data):
     """
     result = '('
     for i in range(len(data) - 1):
-        result += str(data[i]) + ', '
-    result += str(data[-1]) + ')'
+        result += "'" + str(data[i]) + "', "
+    result += "'" + str(data[-1]) + "')"
     return result
 
 
