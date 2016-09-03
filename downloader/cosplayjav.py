@@ -1,12 +1,12 @@
 # coding=utf-8
-__author__ = 'v_mading'
-
-import database.sqls as sql
 import re
 import urllib.request as request
 import urllib.parse as parse
 import os
+import codecs
 import database.sqls as sql
+
+__author__ = 'v_mading'
 
 # CREATE TABLE tb_cosplay (
 #     id INTEGER PRIMARY KEY,
@@ -19,7 +19,7 @@ import database.sqls as sql
 # CREATE TABLE tb_mega (
 #     id INTEGER PRIMARY KEY AUTOINCREMENT,
 #     code INTEGER,
-#     url VARCHAR(1024)
+#     url VARCHAR(1024) UNIQUE
 # );
 
 # 主页面上的一篇文章地址
@@ -57,7 +57,7 @@ def find_cos_img(_content):
 
 # 一些工具方法-----------------------------------------------------------------------------------------------------------
 def gen_headers(referer=''):
-    """
+    """;
     生成一个随机的请求头部
 
     :param referer: 请求头部的referer信息
@@ -109,16 +109,22 @@ class CosplayJav:
         self.megas = []  # mega下载地址
 
     def create(self, url):
+        """
+        依据给出的url生成cos的所有信息
+        :param url: cos的url
+        :return: 生成的cos信息
+        """
+
         self.url = url
         req = request.Request(self.url, headers=gen_headers())
         content = request.urlopen(req, timeout=300).read().decode('utf-8', 'ignore')
         self.title = find_cos_title(content)
-        print('Find Title: ' + self.title)
+        print('Find Title: ' + codecs.encode(self.title, 'gbk', 'ignore').decode('gbk'))
         self.code = self.url.split('/')[3]
         self.img = find_cos_img(content)
         downloads = find_cos_download(content)
         for d in downloads:
-            if 'type' not in d: # 有时会有type=torrent等，这些非mega链接
+            if 'type' not in d:  # 有时会有type=torrent等，这些非mega链接
                 req = request.Request(d, headers=gen_headers())
                 content = request.urlopen(req, timeout=300).read().decode('utf-8', 'ignore')
                 mega = find_mega_url(content)
@@ -165,6 +171,11 @@ def get_all_javs_from_page(page_num, dst):
 
 
 def read_file(path):
+    """
+    读取文件的地址，解析其中内容再重新生成出cos实体
+    :param path: 文件地址
+    :return: cos列表
+    """
     with open(path, encoding='utf-8') as file:
         lines = file.readlines()
 
@@ -191,28 +202,47 @@ def read_file(path):
         elif status[now % len(status)] == 'mega':
             if line.startswith('https'):
                 cos.megas.append(line)
-            else: # 此时已经是blank
+            else:  # 此时已经是blank
                 now = 5
                 now += 1
     return result
 
 
-def insert_cos(cos_list):
+def insert_cos(cos_list, db):
+    """
+    将一个列表的cos信息插入数据库中
+    :param cos_list: 需要插入的cos列表
+    :param db: 需要插入的数据库
+    :return: None
+    """
     datas = [(cos.code, cos.title, cos.url, cos.img, 0) for cos in cos_list]
     columns = ('id', 'name', 'url', 'img', 'status')
-    sql.insert(r'g:\cosplayjav.db', 'tb_cosplay', datas, columns)
+    sql.insert(db, 'tb_cosplay', datas, columns)
+
+
+def insert_mega(cos_list, db):
+    """
+    将一个列表的mega信息插入数据库
+    :param cos_list: 需要插入的cos列表
+    :param db: 需要插入的数据库
+    :return: None
+    """
+    megas = []
+    for cos in cos_list:
+        for m in cos.megas:
+            megas.append((cos.code, m))
+    columns = ('code', 'url')
+    sql.insert(db, 'tb_mega', megas, columns)
 
 if __name__ == '__main__':
     i = 1
-    while i < 239:
-        path = os.path.join(r'g:\doo', str(i))
-        # with open(path, encoding='utf-8') as file:
-        #     for line in file:
-        #         if '881' in line:
-        #             print(i)
-        #             break
-        r = read_file(path)
-        insert_cos(r)
+    while i < 3:
+        get_all_javs_from_page(i, r'd:\cos')
+        # path = os.path.join(r'd:\cos', str(i))
+        # db = r'e:\cosplayjav.db'
+        # r = read_file(path)
+        # insert_mega(r, db)
+        # insert_cos(r, db)
         i += 1
     # with open(r'E:\cosplayjav.txt', encoding='utf-8') as file:
     #     lines = file.readlines()

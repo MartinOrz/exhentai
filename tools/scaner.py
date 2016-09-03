@@ -7,56 +7,52 @@ import zipfile
 import shutil
 
 
-def scan(src, dst):
-    dst_dirs = []
-    for root, dirs, files in os.walk(src):
-        for file in files:
-            if file.endswith('zip'):
-                with open(os.path.join(root, file), 'rb') as file:
-                    dic = pickle.load(file)
-                d = get_path(dst, dic)
-                if d:
-                    dst_dirs.append((root, d))
-
-    for root, save_dst in dst_dirs:
-        os.renames(root, save_dst)
-
-
 def get_path(dst, dic):
-    if dic['type'] == 'cosplay':
+    """
+    根据gallery的分类信息生成存储路径
+    :param dst: 存储根目录
+    :param dic: gallery信息
+    :return: 存储路径
+    """
+    if dic['type'] == 'cosplay':  # cos直接存储
         return os.path.join(dst, 'cos', dic['name'] + '.zip')
-    if dic['is_anthology']:
+    if dic['is_anthology']:  # 杂志直接存储
         return os.path.join(dst, 'anthology', dic['name'])
-    if dic['type'] == 'artistcg' or dic['type'] == 'gamecg':
+    if dic['type'] == 'artistcg' or dic['type'] == 'gamecg':  # cg先依据组，然后再依据作者
         if dic['group'] != 'none':
             return os.path.join(dst, 'cg', 'groups', dic['group'], dic['name'] + '.zip')
         elif dic['artist']:
             return os.path.join(dst, 'cg', 'artists', dic['artist'][0], dic['name'] + '.zip')
         else:
             return None
-    if dic['type'] == 'western':
+    if dic['type'] == 'western':  # western直接依据作者
         if not dic['artist']:
             return None
         return os.path.join(dst, 'western', 'artists', dic['artist'][0], dic['name'] + '.zip')
-    if dic['type'] == 'misc':
+    if dic['type'] == 'misc':  # misc直接存储
         return os.path.join(dst, 'misc', dic['name'] + '.zip')
-    if dic['group'] and dic['group'] != 'none':
+    if dic['group'] and dic['group'] != 'none':  # 同人志或单行本，先依据组，再依据作者
         return os.path.join(dst, 'manga', 'groups', dic['group'], dic['name'] + '.zip')
     if not dic['artist']:
         return None
     return os.path.join(dst, 'manga', 'artists', dic['artist'][0], dic['name'] + '.zip')
 
 
-def zip(path):
+def _zip(path):
+    """
+    将一个文件进行压缩
+    :param path: 文件路径
+    :return: None
+    """
     file_name = path + '.zip'
-    try:
-        print('Start zip: ' + file_name)
-    except:
-        print('Print Name error.')
     zip_file = zipfile.ZipFile(file_name, mode='w', compression=zipfile.ZIP_STORED)
     for root, dirs, files in os.walk(path):
         for f in files:
-            zip_file.write(os.path.join(root, f), os.path.join(root, f).replace(path + os.sep, ''))
+            # 这里检验文件的合法性
+            fp = os.path.join(root, f)
+            if f.endswith('undone.pkl') or os.path.getsize(fp) in [142, 143]:
+                continue
+            zip_file.write(os.path.join(root, f), fp.replace(path + os.sep, ''))
     zip_file.close()
     shutil.rmtree(path)
 

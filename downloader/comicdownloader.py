@@ -1,5 +1,4 @@
 # coding=utf-8
-__author__ = 'mading01'
 
 import urllib.request as request
 import pickle
@@ -10,10 +9,12 @@ import http.cookiejar as cookie
 import queue
 import threading
 import time
-import re
 import os
+import re
 import PIL.Image as Image
 from numpy import array
+
+__author__ = 'mading01'
 
 # 用到的页面地址 =========================================================================================================
 
@@ -23,110 +24,45 @@ loginPage = 'https://forums.e-hentai.org/index.php?act=Login&CODE=01'
 ''' 里站主页 '''
 exhentaiRoot = 'http://exhentai.org/'
 
-''' 示例页面，应用filter后的搜索结果地址 '''
-# http://exhentai.org/?f_doujinshi=0&f_manga=0&f_artistcg=0&f_gamecg=0&f_western=0&f_non-h=0&f_imageset=0&f_cosplay=1&f_asianporn=0&f_misc=0&f_search=&f_apply=Apply+Filter
-
-
-# 用到的正则表达式编译结果，及用用正则寻找匹配的函数=============================================================================
-
-# http://exhentai.org/g/837492/04c9db1aa5/
+# 基本信息1: 页面地址, 英文名称, 日文(中文)名称 ==============================================================================
 gallery = re.compile('http[s]*://exhentai.org/g/\d+/[^/]+/')
-
-# <td onclick="document.location=this.firstChild.href"><a href="http://exhentai.org/g/897485/fef0313621/?p=1" onclick="return false">2</a></td>
-page = re.compile('<td onclick="document.location=this.firstChild.href"><a \S+ onclick="return false">(\d+)</a></td>')
-
-# <div id="gdc"><a href="http://exhentai.org/manga">
-type = re.compile('<div id="gdc"><a href="http[s]*://exhentai\.org/([a-z-]+)">')
-
-# <h1 id="gn">Princess Leia (Star Wars) **Alexandria the Red**</h1>
 name_n = re.compile('<h1 id="gn">([^<]*)</h1>')
-
-# <h1 id="gj">[日暮企画 (日暮りん)] デリバリーナースメイド</h1>
 name_j = re.compile('<h1 id="gj">([^<]*)</h1>')
 
-# <div id="td_language:chinese" class="gt" style="opacity:1.0">
-language = re.compile('<div id="td_language:([^"]+)"')
-
-# <div id="td_parody:kantai_collection" class="gt" style="opacity:1.0">
-parody = re.compile('<div id="td_parody:([^"]+)"')
-
-# <div id="td_group:sky_junction" class="gt" style="opacity:1.0">
-group = re.compile('<div id="td_group:([^"]+)"')
-
-# <div id="td_artist:100yen_locker" class="gt" style="opacity:1.0">
-artist = re.compile('<div id="td_artist:([^"]+)"')
-
-# <div id="td_male:bbm" class="gt" style="opacity:1.0">
-male_tag = re.compile('<div id="td_male:([^"]+)"')
-
-# <div id="td_female:bbm" class="gt" style="opacity:1.0">
-female_tag = re.compile('<div id="td_female:([^"]+)"')
-
-# <tr><td class="gdt1">Posted:</td><td class="gdt2">2015-12-02 03:38</td></tr>
-posted = re.compile('<td class="gdt1">Posted:</td><td class="gdt2">(\d{4}-\d{2}-\d{2} \d{2}:\d{2})</td>')
-
-# td_anthology
-anthology = re.compile('td_anthology')
-
-# 汉化组
+# 基本信息2: 类型, 语言, 汉化组 ============================================================================================
+comic_type = re.compile('<div id="gdc"><a href="http[s]*://exhentai\.org/([a-z-]+)">')
+language = re.compile('<tr><td class="gdt1">Language:</td><td class="gdt2">([\S]+).+?</td></tr>')
 translator = re.compile('[『|\(|\[|【]([^『^\(^\[^【]+[汉|漢]化[^』^\]^\)^】]*)[』|\]|\)|】]')
 
-# var original_rating = 1.29;
-rating = re.compile('<span id="rating_count">(\d+)</span>')
-
-# <tr><td class="gdt1">Length:</td><td class="gdt2">26 pages</td></tr>
+# 基本信息3: 页码长度, 长度, 发布时间 =======================================================================================
+page = re.compile('<td onclick="document.location=this.firstChild.href"><a \S+ onclick="return false">(\d+)</a></td>')
 length = re.compile('<tr><td class="gdt1">Length:</td><td class="gdt2">(\d+) pages</td></tr>')
+posted = re.compile('<td class="gdt1">Posted:</td><td class="gdt2">(\d{4}-\d{2}-\d{2} \d{2}:\d{2})</td>')
 
-# <a href="http://exhentai.org/s/6f93ca0d83/837940-38">
+# 基本信息4: 是否是杂志, 同人作品, 同人角色 ==================================================================================
+anthology = re.compile('td_anthology')
+parody = re.compile('<div id="td_parody:([^"]+)"')
+character = re.compile('id="td_character:(\S+?)"')
+
+# 作者信息: group, artist ===============================================================================================
+group = re.compile('<div id="td_group:([^"]+)"')
+artist = re.compile('<div id="td_artist:([^"]+)"')
+
+# tag信息: male, female, mis ===========================================================================================
+male_tag = re.compile('<div id="td_male:([^"]+)"')
+female_tag = re.compile('<div id="td_female:([^"]+)"')
+misc_tag = re.compile('<td class="tc">misc:</td><td>(<div .+?</div>)+</td>')
+misc_detail = re.compile('<div id="td_(\S+?)" .+?</div>')
+
+# 下载信息: 页码信息, 每页信息, 具体图片地址信息, 图片大小信息, 原图信息, 其他图片页面信息 ==========================================
 pic = re.compile('<a href="(http[s]*://exhentai\.org/s/[^/]+/\d+-\d+)"><img')
-
-# <div id="i3"><a onclick="return load_image(53, 'bc2ffa02b0')" href="http://exhentai.org/s/bc2ffa02b0/837902-53"><img id="img" src="http://182.235.21.79:2550/h/9669c3b4861d5d716265cd66f624673e620c07c2-64353-1200-675-jpg/keystamp=1438335300-6d55c19fba/a_03_05_01Z.jpg" style="height: 675px; width: 1200px; max-width: 1192px; max-height: 671px;"></a></div>
 img = re.compile('<div id="i3"><a onclick="[^"]+" href="[^"]+">\s*<img id="img" src="([^"]+)"')
-
-# <div id="i4"><div>001.jpg :: 1061 x 1506 :: 125.0 KB</div>
 img_info = re.compile('<div id="i4"><div>[^:]+:: (\d+) x (\d+) :: (\S+) ([KM]*B)</div>')
-
-# <a href="#" onclick="return nl('1642-399918')">Click here if the image fails loading</a>
+original_source = re.compile('<a href="([^"]+)">Download original (\d+) x (\d+) ([\d\.]+) (\S+) source</a>')
 another_source = re.compile('<a href="#".*?onclick="return nl\(([^\)]+)\)">Click here if the image fails loading</a>')
 
-# <a href="http://exhentai.org/fullimg.php?gid=719020&page=1&key=520c7cc3d6">Download original 2194 x 3000 1.38 MB source</a>
-original_source = re.compile('<a href="([^"]+)">Download original (\d+) x (\d+) ([\d\.]+) (\S+) source</a>')
 
-
-def find_galleries(input_content):
-    """
-    获取页面中所有的gallery内容。
-    gallery指的是类似http://exhentai.org/g/837492/04c9db1aa5/这样的链接内容。
-
-    :param input_content: 需要解析的页面内容
-    :return: 解析结果，数组形式，其中包含所有解析出的内容
-    """
-    return gallery.findall(input_content)
-
-
-def find_pages(input_content):
-    """
-    获取所有的页码页。
-    页码指的是<td onclick="sp(1)">这样的一段内容，其指出了一共有多少页码。
-
-    :param input_content: 需要解析的页面内容
-    :return: 最大的页码值
-    """
-    pages = [int(x) for x in page.findall(input_content)]
-    if not pages:
-        return 1
-    return max(pages) + 1
-
-
-def find_type(input_content):
-    """
-    从gallery中获取类型信息
-    :param input_content: 需要解析的页面内容
-    :return: 类型信息
-    """
-    return type.findall(input_content)[0]
-
-
+# 基本信息1: 页面地址, 英文名称, 日文(中文)名称 ==============================================================================
 def find_name_n(input_content):
     """
     从gallery中获取n类型的名称。n类型名称为英文名
@@ -147,6 +83,16 @@ def find_name_j(input_content):
     return name_j.findall(input_content)[0]
 
 
+# 基本信息2: 类型, 语言, 汉化组 ============================================================================================
+def find_type(input_content):
+    """
+    从gallery中获取类型信息
+    :param input_content: 需要解析的页面内容
+    :return: 类型信息
+    """
+    return comic_type.findall(input_content)[0]
+
+
 def find_language(input_content):
     """
     从gallery中获取语言。对于原生日语内容，则返回'default'。
@@ -160,6 +106,63 @@ def find_language(input_content):
         return 'default'
 
 
+def find_translator(input_content):
+    """
+    获取汉化组。没有则返回None
+    :param input_content: 需要解析的页面内容
+    :return: 解析结果
+    """
+    tmp = translator.findall(input_content)
+    if tmp:
+        return tmp[0]
+    else:
+        return None
+
+
+# 基本信息3: 页码长度, 长度, 发布时间 =======================================================================================
+def find_pages(input_content):
+    """
+    获取所有的页码页。
+    页码指的是<td onclick="sp(1)">这样的一段内容，其指出了一共有多少页码。
+
+    :param input_content: 需要解析的页面内容
+    :return: 最大的页码值
+    """
+    pages = [int(x) for x in page.findall(input_content)]
+    if not pages:
+        return 1
+    return max(pages) + 1
+
+
+def find_length(input_content):
+    """
+    从gallery中获取长度信息，即有多少页
+
+    :param input_content: 需要解析的页面内容
+    :return: 作品长度
+    """
+    return length.findall(input_content)[0]
+
+
+def find_posted(input_content):
+    """
+    从gallery中获取发表时间
+    :param input_content: 需要解析的页面内容
+    :return: 解析结果
+    """
+    return posted.findall(input_content)[0]
+
+
+# 基本信息4: 是否是杂志, 同人作品, 同人角色 ==================================================================================
+def find_anthology(input_content):
+    """
+    判断是否是杂志。
+    :param input_content: 需要解析的页面内容
+    :return: True 如果是杂志，否则为False
+    """
+    return len(anthology.findall(input_content)) > 0
+
+
 def find_parody(input_content):
     """
     从gallery中获取同人的作品。如果是原创作品则返回'original'。
@@ -168,11 +171,21 @@ def find_parody(input_content):
     """
     tmp = parody.findall(input_content)
     if tmp:
-        return tmp[0]
+        return tmp
     else:
-        return 'original'
+        return ['original']
 
 
+def find_characters(input_content):
+    """
+    从gallery中获取charater信息。charater即是指此同人的角色信息
+    :param input_content: 需要解析的页面内容
+    :return: 解析结果
+    """
+    return character.findall(input_content)
+
+
+# 作者信息: group, artist ===============================================================================================
 def find_group(input_content):
     """
     从gallery中获取group信息。group即是指作者所在的同人社团。没有则返回'none'
@@ -186,7 +199,7 @@ def find_group(input_content):
         return 'none'
 
 
-def find_artist(input_content):
+def find_artists(input_content):
     """
     从gallery中获取所有的作者信息。作者可能有多个，因此返回的是列表形式。没有则返回空列表。
     :param input_content: 需要解析的页面内容
@@ -195,6 +208,7 @@ def find_artist(input_content):
     return artist.findall(input_content)
 
 
+# tag信息: male, female, mis ===========================================================================================
 def find_male_tag(input_content):
     """
     从gallery中获取所有的男性标签。返回为列表形式。没有则为空列表。
@@ -213,57 +227,20 @@ def find_female_tag(input_content):
     return female_tag.findall(input_content)
 
 
-def find_posted(input_content):
+def find_misc_tag(input_content):
     """
-    从gallery中获取发表时间
+    从gallery中获取所有的杂项标签。返回为列表形式，没有则为空列表
     :param input_content: 需要解析的页面内容
     :return: 解析结果
     """
-    return posted.findall(input_content)[0]
-
-
-def find_anthology(input_content):
-    """
-    判断是否是杂志。
-    :param input_content: 需要解析的页面内容
-    :return: True 如果是杂志，否则为False
-    """
-    return len(anthology.findall(input_content)) > 0
-
-
-def find_translator(input_content):
-    """
-    获取汉化组。没有则返回None
-    :param input_content: 需要解析的页面内容
-    :return: 解析结果
-    """
-    tmp = translator.findall(input_content)
-    if tmp:
-        return tmp[0]
+    miscs = misc_tag.findall(input_content)
+    if miscs:
+        return [misc_detail.findall(misc)[0] for misc in miscs]
     else:
-        return None
+        return []
 
 
-def find_rating(input_content):
-    """
-    从gallery中获取评分。评分即为rating
-
-    :param input_content: 需要解析的页面内容
-    :return: 评分结果
-    """
-    return int(rating.findall(input_content)[0])
-
-
-def find_length(input_content):
-    """
-    从gallery中获取长度信息，即有多少页
-
-    :param input_content: 需要解析的页面内容
-    :return: 作品长度
-    """
-    return length.findall(input_content)[0]
-
-
+# 下载信息: 页码信息, 每页信息, 具体图片地址信息, 图片大小信息, 原图信息, 其他图片页面信息 ==========================================
 def find_pics(input_content):
     """
     从gallery中解析出所有的图片页面地址
@@ -301,16 +278,6 @@ def find_img_info(input_content):
     return ImageInfo(int(result[0]), int(result[1]), size)
 
 
-def find_another_img(input_content):
-    """
-    当图片下载失败的时候尝试换个图源
-
-    :param input_content: 需要解析的页面内容
-    :return: 新图源的页面后缀
-    """
-    return another_source.findall(input_content)[0][1:-1]
-
-
 def find_original_source(input_content):
     """
     尝试寻找原始图源（更清晰）
@@ -328,8 +295,39 @@ def find_original_source(input_content):
         size = float(result[3]) / 1024
     else:
         size = float(result[3]) * 1024
-    img = ImageInfo(int(result[1]), int(result[2]), size)
-    return path, img
+    image = ImageInfo(int(result[1]), int(result[2]), size)
+    return path, image
+
+
+def find_another_img(input_content):
+    """
+    当图片下载失败的时候尝试换个图源
+
+    :param input_content: 需要解析的页面内容
+    :return: 新图源的页面后缀
+    """
+    return another_source.findall(input_content)[0][1:-1]
+
+
+# 记录的方法 ============================================================================================================
+LOG_LEVELS = ['info ', 'warn ', 'error', 'fatal']  # log级别
+
+NOW_LEVEL = 0  # 当前的log级别
+
+
+def log(info_mode, *args):
+    """
+    按格式输出信息。
+
+    :param info_mode: 输出头部，格式为[info_mode]:
+    :param args: 输出的内容
+    :return: None
+    """
+    if info_mode >= NOW_LEVEL:
+        print('[' + LOG_LEVELS[info_mode] + ']:', end=' ')
+        for arg in args:
+            print(arg, end=' ')
+        print('')
 
 
 # 工具方法，主要提供对exhentai的连接服务 ====================================================================================
@@ -429,10 +427,10 @@ def count_img_hash(file_name):
     :param file_name: 需要计算的文件名
     :return: 得出的哈希值
     """
-    _image = Image.open(file_name)
-    _image = _image.resize((9, 8))
-    _image = array(_image.convert('L'))
-    result = 0
+    with Image.open(file_name) as _image:
+        _image = _image.resize((9, 8))
+        _image = array(_image.convert('L'))
+        result = 0
     for line in _image:
         now = -1
         for num in line:
@@ -451,30 +449,8 @@ def clean_dir(root_path):
             if size == 0 or size in [142, 143]: # 142是403gif的大小
                 os.remove(file)
 
-# 用于记录信息的函数 ======================================================================================================
-
-LOG_LEVELS = ['info ', 'warn ', 'error', 'fatal']  # log级别
-
-NOW_LEVEL = 0  # 当前的log级别
-
-
-def log(info_mode, *args):
-    """
-    按格式输出信息。
-
-    :param info_mode: 输出头部，格式为[info_mode]:
-    :param args: 输出的内容
-    :return: None
-    """
-    if info_mode >= NOW_LEVEL:
-        print('[' + LOG_LEVELS[info_mode] + ']:', end=' ')
-        for arg in args:
-            print(arg, end=' ')
-        print('')
-
 
 # 承载下载信息的类 =======================================================================================================
-
 class Gallery:
     """
     一个画集，即具体下载的一部作品。
@@ -484,62 +460,66 @@ class Gallery:
         """
         初始化函数。gallery以基本路径作为基础，包含了以下参数：
 
-        - rootPath: 路径，形式为 http://exhentai.org/g/837492/04c9db1aa5/
+        - root_path: 路径，形式为 http://exhentai.org/g/837492/04c9db1aa5/
         - member_id: 用户id
         - pass_hash: 用户密码hash，以上参数用以读取url内容
-        - attributeCode: 特征码，即837492这样的数字
-        - attributeStr: 特征字符串，即04c9db1aa5这一串
-        - type: 作品类型
-        - posted: 发布时间
-        - name_j: 日文名称
         - name_n: 英文名称
+        - name_j: 日文名称
         - name: 作品名称，取日文名，如无日文名则取英文名
+
+        - type: 作品类型
         - language: 作品语言
+        - translator: 汉化组
+
+        - pages: 页码，即此画集包含多少页页面
+        - length: 作品长度，即共有多少图片
+        - posted: 发布时间
+
+        - is_anthology: 是否是杂志
         - parody: 同人作品
+        - character: 同人角色
+
         - group: 同人社团
         - artist: 作者
+
         - male_tag: 男性标签
         - female_tag: 女性标签
-        - is_anthology: 是否是杂志
-        - translator: 汉化组
-        - rating: 评分，取平均值
-        - length: 作品长度，即共有多少图片
-        - pages: 页码，即此画集包含多少页页面
-        - imgList: 所有图片的地址列表
-        - originList: 所有原图的地址信息
+        - misc_tag: 杂项标签
+
+        - img_info: 所有图片的信息列表
 
         :param rpath: gallery的基本路径
         :param member_id: e站用户id
         :param pass_hash: e站用户密码哈希值
         :return: 类型实例
         """
-        self.rootPath = rpath
-
+        self.root_path = rpath
         self.member_id = member_id
         self.pass_hash = pass_hash
-
-        temp_list = rpath.split('/')
-        self.attributeCode = temp_list[4]
-        self.attributeStr = temp_list[5]
-        self.type = ''
-        self.posted = ''
-        self.name_j = ''
         self.name_n = ''
+        self.name_j = ''
         self.name = ''
+
+        self.type = ''
         self.language = ''
-        self.parody = ''
+        self.translator = ''
+
+        self.pages = 0
+        self.length = 0
+        self.posted = ''
+
+        self.is_anthology = False
+        self.parody = []
+        self.character = []
+
         self.group = ''
         self.artist = []
+
         self.male_tag = []
         self.female_tag = []
-        self.is_anthology = False
-        self.translator = ''
-        self.rating = 0
-        self.length = 0
-        self.pages = 0
-        self.imgList = []
-        self.originList = {}
-        self.imgHashDic = {}
+        self.misc_tag = []
+
+        self.img_info = []
 
     def analysis_pages(self):
         """
@@ -548,14 +528,12 @@ class Gallery:
         :return: 读取的页面内容，可供进一步解析
         """
         log(0, '开始分析作品内容 ================================================================')
-        req = request.Request(self.rootPath, headers=gen_headers(self.member_id, self.pass_hash))
+        req = request.Request(self.root_path, headers=gen_headers(self.member_id, self.pass_hash))
         _content = request.urlopen(req, timeout=60).read().decode('utf-8')
-        self.type = find_type(_content)
-        self.posted = find_posted(_content)
 
         # 获取语言和名称，汉化组。中文由于需要寻找汉化组，所以处理方式不一样
         self.language = find_language(_content)
-        if self.language == 'chinese':
+        if self.language == 'Chinese':
             name1 = find_name_n(_content)
             name2 = find_name_j(_content)
             self.name_n = name1
@@ -574,7 +552,6 @@ class Gallery:
                 self.translator = trans1
             else:
                 self.translator = '未知汉化'
-
         else:
             # 解析名称，如果有日文名则设置为日文名，否则设置为英文名
             self.name_j = find_name_j(_content)
@@ -585,29 +562,29 @@ class Gallery:
                 self.name = self.name_n
             self.translator = 'none'
 
-        self.parody = find_parody(_content)
-        self.group = find_group(_content)
-        self.artist = find_artist(_content)
-        self.male_tag = find_male_tag(_content)
-        self.female_tag = find_female_tag(_content)
-        self.is_anthology = find_anthology(_content)
-
         invalid_chars = '?*"<>/;:|'
         for char in invalid_chars:
             self.name = self.name.replace(char, ' ')
         log(0, '获取作品名称结束:', codecs.encode(self.name, 'gbk', 'ignore').decode('gbk'))
-
-        # 解析评分
-        self.rating = float(find_rating(_content)) / 10
-        log(0, '获取作品评分结束:', self.rating)
+        self.type = find_type(_content)
 
         # 解析长度
+        self.pages = int(find_pages(_content))
         self.length = int(find_length(_content))
         log(0, '获取作品长度结束，共:', self.length, '页')
+        self.posted = find_posted(_content)
 
-        # 获取所有图片========================================================================
-        self.pages = find_pages(_content)
-        log(0, '获取页面长度结束，共:', self.pages, '页')
+        self.is_anthology = find_anthology(_content)
+        self.parody = find_parody(_content)
+        self.character = find_characters(_content)
+
+        self.group = find_group(_content)
+        self.artist = find_artists(_content)
+
+        self.male_tag = find_male_tag(_content)
+        self.female_tag = find_female_tag(_content)
+        self.misc_tag = find_misc_tag(_content)
+
         return _content
 
     def get_all_imgs(self, _content):
@@ -637,29 +614,101 @@ class Gallery:
         变形为一个dict以存储
         """
         dic = dict()
-        dic['root_path'] = self.rootPath
-        dic['attributeCode'] = self.attributeCode
-        dic['attributeStr'] = self.attributeStr
-        dic['type'] = self.type
-        dic['posted'] = self.posted
-        dic['name_j'] = self.name_j
+        dic['root_path'] = self.root_path
         dic['name_n'] = self.name_n
+        dic['name_j'] = self.name_j
         dic['name'] = self.name
+
+        dic['type'] = self.type
         dic['language'] = self.language
+        dic['translator'] = self.translator
+
+        dic['pages'] = self.pages
+        dic['length'] = self.length
+        dic['posted'] = self.posted
+
+        dic['is_anthology'] = self.is_anthology
         dic['parody'] = self.parody
+        dic['character'] = self.character
+
         dic['group'] = self.group
         dic['artist'] = self.artist
+
         dic['male_tag'] = self.male_tag
         dic['female_tag'] = self.female_tag
-        dic['is_anthology'] = self.is_anthology
-        dic['translator'] = self.translator
-        dic['rating'] = self.rating
-        dic['length'] = self.length
-        dic['pages'] = self.pages
-        dic['img_list'] = [img_task.to_dict() for img_task in self.imgList]
-        dic['originList'] = self.originList
-        dic['imgHashDic'] = self.imgHashDic
+        dic['misc_tag'] = self.misc_tag
+
         return dic
+
+
+class ImageInfo:
+    """
+    图片信息类，用以检测下载的图片是否正确
+    """
+
+    def __init__(self, url, page):
+        """
+        初始化函数。此类包含以下参数:
+
+        - url: 图片显示的地址
+        - page: 图片页码
+
+        - width: 宽度，从页面获取
+        - height: 高度，从页面获取
+        - size: 大小，从页面获取
+
+        - width_ori: 原图宽度，没有原图则设置为0
+        - height_ori: 原图高度，没有原图则设置为0
+        - size_ori: 原图大小，没有原图则设置为0
+
+        :return: 类型实例
+        """
+        self.url = url
+        self.page = page
+
+        self.width = 0
+        self.height = 0
+        self.size = 0
+
+        self.width_ori = 0
+        self.height_ori = 0
+        self.size_ori = 0
+
+    def analysis_page(self, headers):
+        req = request.Request(self.url, headers=headers)
+        _content = request.urlopen(req, timeout=60).read().decode('utf-8')
+
+
+
+    def set_real_info(self, img_path):
+        """
+        根据图片地址获取图片的实际信息
+
+        :param img_path: 下载的图片的地址
+        :return: None
+        """
+        self.path = img_path
+        with Image.open(self.path) as _img:
+            self.realWidth, self.realHeight = _img.size
+            self.realSize = os.path.getsize(self.path)
+
+    def is_valid(self):
+        """
+        判断文件是否合法。需要在set_real_info()方法调用之后调用才能得到正确结果。
+
+        :return: 图片是否合法
+        """
+        if self.realWidth != self.expectedWidth:
+            return False
+        if self.realHeight != self.expectedHeight:
+            return False
+
+        return self.realSize > 0 and (self.realSize not in [142, 143])
+
+    def __str__(self):
+        return "[ImageInfo : width: " + str(self.realWidth) + "/" + str(self.expectedWidth) + \
+               ", height: " + str(self.realHeight) + "/" + str(self.expectedHeight) + ", size: " + str(self.realSize) +\
+               "/" + str(self.expectedSize) + "]"
 
 
 class ImageDownloadTask:
@@ -745,9 +794,9 @@ class ImageInfo:
         :return: None
         """
         self.path = img_path
-        _img = Image.open(self.path)
-        self.realWidth, self.realHeight = _img.size
-        self.realSize = os.path.getsize(self.path) / 1024  # 转化为kb
+        with Image.open(self.path) as _img:
+            self.realWidth, self.realHeight = _img.size
+            self.realSize = os.path.getsize(self.path)
 
     def is_valid(self):
         """
@@ -760,8 +809,7 @@ class ImageInfo:
         if self.realHeight != self.expectedHeight:
             return False
 
-        size_diff = self.realSize - self.expectedSize
-        return (15 > size_diff) and (-15 < size_diff)
+        return self.realSize > 0 and (self.realSize not in [142, 143])
 
     def __str__(self):
         return "[ImageInfo : width: " + str(self.realWidth) + "/" + str(self.expectedWidth) + \
@@ -1093,58 +1141,12 @@ def getTestPkl():
 
 
 if __name__ == '__main__':
-    # memberId, passHash = connect_to_exhentai('mdlovewho', 'ma199141')
-    memberId = '2631394'
-    passHash = '77ded0c31e820ed60d11e6ca9b458c72'
+    memberId, passHash = connect_to_exhentai('mdlovewho', 'ma199141')
+    gallery = Gallery('https://exhentai.org/g/972351/6d54f9a7c6/', memberId, passHash)
+    gallery.analysis_pages()
+    print(gallery.to_dict())
 
-    log(0, '连接e绅士成功!')
-    clean_dir(r'd:\bbb')
-    find_undone_imgs(r'd:\bbb')
-    # # # # # # # # # # # # # #
-    # with open(getTestPkl(), 'rb') as ff:
-    #     fileList = pickle.load(ff)
-    #
-    # log(0, '本次下载共', len(fileList), '个任务')
-    # i = 0
-    # for line in fileList:
-    #     line = line[0]
-    #     log(0, "任务地址: ", line)
-    #     i += 1
-    #     gallery = Gallery(line, memberId, passHash)
-    #     content = gallery.analysis_pages()
-    #     gallery.get_all_imgs(content)
-    #     log(0, '任务', i, '分析画集结束！')
-    #     dispatcher = Dispatcher(gallery, r'd:\bbb', 5, memberId, passHash)
-    #     dispatcher.start()
-    #
-    #     while not dispatcher.done:
-    #         time.sleep(10)
-    # #
-    # scavenger = Scavenger(r'D:\bbb', memberId, passHash)
-    # scavenger.start()
 
-    # find_authors(r'd:\bbb', memberId, passHash)
-
-    # root_path = r'e:\eee'
-    # errs = []
-    # import zipfile
-    # for root, dirs, files in os.walk(root_path):
-    #     for file in files:
-    #         if file.endswith('.zip'):
-    #             try:
-    #                 zfile = zipfile.ZipFile(os.path.join(root, file), 'r')
-    #                 content = zfile.read(zfile.namelist()[-1])
-    #                 dic = pickle.loads(content)
-    #                 root_path = dic['root_path']
-    #                 gallery = Gallery(root_path, memberId, passHash)
-    #                 gallery.analysis_pages()
-    #                 with open(os.path.join(root, file + '.dic'), 'wb') as f:
-    #                     pickle.dump(gallery.to_dict(), f)
-    #             except:
-    #                 errs.append(os.path.join(root, file))
-    # with open(r'd:\err', 'w', encoding='utf-8') as file:
-    #     for err in errs:
-    #         file.write(err + '\n')
 
 
 
