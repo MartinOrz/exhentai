@@ -236,13 +236,13 @@ def insert_mega(cos_list, db):
 
 if __name__ == '__main__':
     i = 1
-    while i < 3:
-        get_all_javs_from_page(i, r'd:\cos')
-        # path = os.path.join(r'd:\cos', str(i))
-        # db = r'e:\cosplayjav.db'
-        # r = read_file(path)
-        # insert_mega(r, db)
-        # insert_cos(r, db)
+    while i < 4:
+        # get_all_javs_from_page(i, r'd:\cos')
+        path = os.path.join(r'd:\cos', str(i))
+        db = r'e:\cosplayjav.db'
+        r = read_file(path)
+        insert_mega(r, db)
+        insert_cos(r, db)
         i += 1
     # with open(r'E:\cosplayjav.txt', encoding='utf-8') as file:
     #     lines = file.readlines()
