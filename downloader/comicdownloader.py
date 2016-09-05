@@ -24,7 +24,7 @@ loginPage = 'https://forums.e-hentai.org/index.php?act=Login&CODE=01'
 exhentaiRoot = 'http://exhentai.org/'
 
 # 全局变量，登录信息，只保存一次 ============================================================================================
-MEMBER_ID, PASS_HASH = None
+MEMBER_ID, PASS_HASH = None, None
 
 # 全局变量 是否发生了403 ==================================================================================================
 HAS_403 = False
@@ -358,6 +358,7 @@ def find_original_path(input_content):
     """
     ori = original_source.findall(input_content)[0]
     if ori:
+        print(ori)
         return ori[0][0].replace('&amp;', '&')
     return None
 
@@ -428,6 +429,7 @@ class Gallery:
         - misc_tag: 杂项标签
 
         - img_info: 所有图片的信息列表
+        - save_path: 实际的保存地址
 
         :param rpath: gallery的基本路径
         :return: 类型实例
@@ -456,12 +458,14 @@ class Gallery:
         self.female_tag = []
         self.misc_tag = []
 
-        self.img_info = []
+        self.imgs = []
+        self.save_path = ''
 
-    def analysis_pages(self):
+    def analysis_pages(self, save_path):
         """
         根据gallery路径分析页面内容，填充数据。
 
+        :param save_path: 图片存储地址
         :return: 读取的页面内容，可供进一步解析
         """
         log(0, '开始分析作品内容 ================================================================')
@@ -522,29 +526,28 @@ class Gallery:
         self.female_tag = find_female_tag(_content)
         self.misc_tag = find_misc_tag(_content)
 
-        return _content
-
-    def get_all_imgs(self, _content):
-        """
-        获取此gallery下的所有图片
-
-        :param _content: 页面的解析结果
-        """
+        # 获取所有图片地址
         # 第一页单独获取，因为content已经拿到，同时不需要添加p=?的参数
-        self.imgList = [ImageDownloadTask(self.rootPath, p) for p in find_pics(_content)]
-        with open(r'd:\1.pkl', 'wb') as file:
-            pickle.dump([l.downloadInfo for l in self.imgList], file)
-        log(0, '从第1页获取图片列表结束, 当前的图片列表长度:', len(self.imgList))
+        tasks = []
+        self.save_path = os.path.join(save_path, self.name)
+        for p in find_pics(_content):
+            task = ImageDownloadTask(self.root_path, p, self.save_path)
+            tasks.append(task)
+            self.imgs.append(task.get_img_info())
+        log(0, '从第1页获取图片列表结束, 当前的图片列表长度:', len(self.imgs))
 
-        ref = self.rootPath
+        ref = self.root_path
         for i in range(1, self.pages):
-            now_page = self.rootPath + '?p=' + str(i)
-            req = request.Request(now_page, headers=gen_headers(self.member_id, self.pass_hash, ref))
-            _content = request.urlopen(req, timeout=60).read().decode('utf-8')
-            self.imgList += [ImageDownloadTask(self.rootPath, p) for p in find_pics(_content)]
-            self.imgList = list(set(self.imgList))
-            log(0, '从第' + str(i + 1) + '页获取图片列表结束, 当前的图片列表长度:', len(self.imgList))
+            now_page = self.root_path + '?p=' + str(i)
+            req = request.Request(now_page, headers=gen_headers(ref))
+            tmp = request.urlopen(req, timeout=60).read().decode('utf-8')
+            for p in find_pics(tmp):
+                task = ImageDownloadTask(self.root_path, p, self.save_path)
+                tasks.append(task)
+                self.imgs.append(task.get_img_info())
+            log(0, '从第' + str(i + 1) + '页获取图片列表结束, 当前的图片列表长度:', len(self.imgs))
             ref = now_page
+        return tasks
 
     def to_dict(self):
         """
@@ -574,8 +577,27 @@ class Gallery:
         dic['male_tag'] = self.male_tag
         dic['female_tag'] = self.female_tag
         dic['misc_tag'] = self.misc_tag
+        dic['imgs'] = self.imgs
 
         return dic
+
+    def mkdir(self):
+        """
+        下载时创建文件夹
+
+        :return: None
+        """
+        if not os.path.exists(self.save_path):  # 下载前先创建文件夹
+            os.mkdir(self.save_path)
+
+    def save_dict(self):
+        """
+        使用pickle储存所有内容
+
+        :return: None
+        """
+        with open(os.path.join(self.save_path, 'gallery.pkl'), 'wb') as file:
+            pickle.dump(self.to_dict(), file)
 
 
 # 一张图片的下载信息以及图片信息类 ===========================================================================================
@@ -620,6 +642,70 @@ class ImageDownloadTask:
         self.ori = find_original_path(_content)
         self.img_info.set_name(self.src, self.ori)
 
+    def download(self):
+        """
+        进行一次下载，如果有原图则下载原图。否则下载普通图片。
+
+        :return: 是否下载成功
+        """
+        return self.download_ori() if self.ori else self.download_normal()
+
+    def download_ori(self):
+        """
+        尝试下载原图，失败则尝试次数加1
+
+        :return: 是否下载成功
+        """
+        global HAS_403
+        try:
+            req = request.Request(self.ori, headers=gen_headers(self.src))
+            file_name = self.img_info.check_ori(self.save_path)
+            if not file_name:  # 已经完成了下载
+                return
+            response = request.urlopen(req, timeout=120)
+            with open(file_name, 'wb') as _file:
+                _content = response.read()
+                _file.write(_content)
+            return True
+        except urllib.error.HTTPError as e:
+            log(2, self.ori + " open url failed.", e)
+            if str(e.code) == '403':
+                HAS_403 = True
+            self.try_times += 1
+        except Exception as e:  # 连接超时等其他错误
+            log(2, self.ori + " open url failed.", e)
+            self.try_times += 1
+        return False
+
+    def download_normal(self):
+        """
+        下载一张图片，非原图。失败则寻找新图源
+
+        :return: 是否成功
+        """
+        global HAS_403
+        try:
+            req = request.Request(self.src, headers=gen_headers(self.url))
+            file_name = self.img_info.check_normal(self.save_path)
+            if not file_name:  # 已经完成了下载
+                return
+            response = request.urlopen(req, timeout=120)
+            with open(file_name, 'wb') as _file:
+                _content = response.read()
+                _file.write(_content)
+            return True
+        except urllib.error.HTTPError as e:
+            log(2, self.src + " open url failed.", e)
+            if str(e.code) == '403':
+                HAS_403 = True
+            self.try_times += 1
+            self.find_another_src()
+        except Exception as e:  # 连接超时等其他错误
+            log(2, self.src + " open url failed.", e)
+            self.try_times += 1
+            self.find_another_src()
+        return False
+
     def find_another_src(self):
         """
         下载图片失败，寻找一个新的源
@@ -645,35 +731,13 @@ class ImageDownloadTask:
             log(2, self.url + " find another src failed.", e)
             self.try_times += 1
 
-    def download_ori(self):
+    def get_img_info(self):
         """
-        尝试下载原图，失败则尝试次数加1
-        :return:
+        获取dict形式的ImageInfo信息
+
+        :return: dict形式ImageInfo信息
         """
-        global HAS_403
-        if not self.ori:
-            Exception('Download Error: This file has no original resource!')
-        req = request.Request(self.ori.replace('&amp;', '&'), headers=gen_headers(self.src))
-
-        try:
-            file_name = self.img_info.check_ori(self.save_path)
-            if not file_name:  # 已经完成了下载
-                return
-            response = request.urlopen(req, timeout=120)
-            with open(file_name, 'wb') as _file:
-                _content = response.read()
-                _file.write(_content)
-            return True
-        except urllib.error.HTTPError as e:
-            log(2, self.name + " open url failed.", e)
-            if str(e.code) == '403':
-                HAS_403 = True
-            self.try_times += 1
-        except Exception as e:  # 连接超时等其他错误
-            log(2, self.name + " open url failed.", e)
-            self.try_times += 1
-
-        return False
+        return self.img_info.to_dict()
 
 
 class ImageInfo:
@@ -681,7 +745,7 @@ class ImageInfo:
     图片信息类，用以检测下载的图片是否正确
     """
 
-    def __init__(self, url, page_no):
+    def __init__(self, url='', page_no='0'):
         """
         初始化函数。此类包含以下参数:
 
@@ -702,23 +766,6 @@ class ImageInfo:
         """
         self.url = url
         self.page = page_no
-
-        self.name = ''
-        self.width = 0
-        self.height = 0
-        self.size = 0
-
-        self.name_ori = None
-        self.width_ori = 0
-        self.height_ori = 0
-        self.size_ori = 0
-
-    def __init__(self):
-        """
-        默认构造函数
-        """
-        self.url = ''
-        self.page = '0'
 
         self.name = ''
         self.width = 0
@@ -786,7 +833,6 @@ class ImageInfo:
         if abs(real_size - self.size_ori) > 10:
             return file_name
         return None
-
 
     def check_normal(self, save_path):
         """
@@ -863,3 +909,106 @@ class ImageInfo:
         result.height_ori = dic['height_ori']
         result.size_ori = dic['size_ori']
         return result
+
+
+class Dispatcher(threading.Thread):
+    """
+    监视线程，也负责工作的维护
+    """
+
+    def __init__(self, root_path, save_path, worker_number):
+        threading.Thread.__init__(self)
+        self.name = 'Dispatcher'
+        self.queue = queue.Queue()
+        self.root_path = root_path
+        self.save_path = save_path
+        self.gallery = None
+        self.worker_number = worker_number
+
+        self.done = False
+        self.workers = []
+
+    def run(self):
+        try:
+            self.gallery = Gallery(self.root_path)
+            tasks = self.gallery.analysis_pages(self.save_path)
+            for task in tasks:
+                self.queue.put(task)
+        except Exception as e:  # 创建出错的话直接返回
+            log(2, 'Error in creating gallery:', e)
+            return
+
+        # 创建worker
+        for i in range(self.worker_number):
+            self.workers.append(Worker('Worker' + str(i), self.queue))
+
+        # 开始下载
+        self.gallery.mkdir()
+        for worker in self.workers:
+            worker.start()
+
+        while not self.done:
+
+            awake = 0
+            for worker in self.workers:
+                # 查询线程工作状态
+                if not worker.done:
+                    awake += 1
+
+            if self.queue.qsize() < 1 and awake == 0:
+                # 当任务队列结束，并且所有线程都结束时，任务结束
+                self.done = True
+                for worker in self.workers:
+                    worker.stop()
+                self.gallery.save_dict()
+                log(0, 'Task Over')
+
+            time.sleep(2)
+
+
+# 负责下载的工作类
+class Worker(threading.Thread):
+    """
+    下载工作类，即一个线程
+    """
+
+    def __init__(self, name, que):
+        threading.Thread.__init__(self)
+        self.name = name
+        self.done = False  # 任务是否已完成
+        self.queue = que  # 任务队列
+
+    def stop(self):
+        """
+        彻底终止此线程
+        """
+        self.done = True
+
+    def run(self):
+        """
+        执行下载任务
+        """
+        global HAS_403
+
+        while not self.done:
+            try:
+                task = self.queue.get(timeout=5)  # 阻塞模式，最多等待5秒
+                if task.try_times > 3:
+                    log(0, 'task:', task.url, 'is over tried.')
+                elif HAS_403:
+                    log(0, '403 happened.')
+                    self.stop()
+                elif task.download():  # 下载成功
+                    log(0, 'download success. now queue size:', len(self.queue))
+                else:  # 下载失败
+                    self.queue.put(task)
+                    log(0, 'download failed. now queue size:', len(self.queue))
+            except queue.Empty:  # empty即取出任务失败，没有任务可用时
+                log(0, self.name, ' done!')
+                self.stop()
+
+
+if __name__ == '__main__':
+    connect_to_exhentai('mdlovewho', 'ma199141')
+    dispacher = Dispatcher('https://exhentai.org/g/973249/0492db378f/', r'd:\bbb', 5)
+    dispacher.start()
