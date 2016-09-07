@@ -1,18 +1,17 @@
 # coding=utf-8
 
-import urllib.request as request
-import pickle
 import codecs
-import urllib.parse as parse
-import urllib.error
-import http.cookiejar as cookie
+import glob
 import queue
+import os
+import pickle
+import re
 import threading
 import time
-import os
-import re
+import urllib.error
+# import urllib.request as request
+import requests
 import PIL.Image as Image
-from numpy import array
 
 __author__ = 'mading01'
 
@@ -22,6 +21,9 @@ loginPage = 'https://forums.e-hentai.org/index.php?act=Login&CODE=01'
 
 ''' 里站主页 '''
 exhentaiRoot = 'http://exhentai.org/'
+
+''' 超限时gif的地址 '''
+wrongGif = 'https://exhentai.org/img/509.gif'
 
 # 全局变量，登录信息，只保存一次 ============================================================================================
 MEMBER_ID, PASS_HASH = None, None
@@ -39,35 +41,25 @@ def connect_to_exhentai(username, password):
             - member_id: 用于生成header
             - pass_hash: 用于生成header
     """
-    global MEMBER_ID, PASS_HASH
-
-    cj = cookie.CookieJar()
-    opener = request.build_opener(request.HTTPCookieProcessor(cj))
-    opener.addheaders = [('User-agent','Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)')]
-    data = parse.urlencode({'returntype': 8, 'CookieDate': 1, 'b': 'd', 'bt': 'pone',
-                            'UserName': username, 'PassWord': password}).encode(encoding='UTF8')
-    opener.open(loginPage, data)
-    for c in cj:
-        if c.name == 'ipb_member_id':
-            MEMBER_ID = c.value
-        if c.name == 'ipb_pass_hash':
-            PASS_HASH = c.value
+    global MEMBER_ID, PASS_HASH, loginPage
+    headers = {'User-agent': 'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)'}
+    data = {'returntype': 8, 'CookieDate': 1, 'b': 'd', 'bt': 'pone', 'UserName': username, 'PassWord': password}
+    response = requests.post(loginPage, data=data, headers=headers)
+    cookies = response.cookies.get_dict()
+    MEMBER_ID = cookies['ipb_member_id']
+    PASS_HASH = cookies['ipb_pass_hash']
 
 
 def gen_headers(referer=''):
     """
     生成一个随机的请求头部
 
-    :param member_id: 用户id，在登录之后可以获取到
-    :param pass_hash: 用户密码的hash值，在登录之后可以得到
     :param referer: 请求头部的referer信息
     :return: 生成的请求头
     """
     global MEMBER_ID, PASS_HASH
-
     if not MEMBER_ID:  # 未登录
         Exception('Please login first!')
-
     user_agent = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/43.0.2357.81 ' + \
                  'Safari/537.36'
     h_cookie = 'nw=1;ipb_member_id=' + MEMBER_ID + ';ipb_pass_hash=' + PASS_HASH + ';'
@@ -184,7 +176,7 @@ def find_pages(input_content):
     pages = [int(x) for x in page.findall(input_content)]
     if not pages:
         return 1
-    return max(pages) + 1
+    return max(pages)
 
 
 def find_length(input_content):
@@ -356,9 +348,8 @@ def find_original_path(input_content):
     :param input_content: 需要解析的页面内容
     :return: 原图地址，没有则为None
     """
-    ori = original_source.findall(input_content)[0]
+    ori = original_source.findall(input_content)
     if ori:
-        print(ori)
         return ori[0][0].replace('&amp;', '&')
     return None
 
@@ -371,6 +362,18 @@ def find_another_img(input_content):
     :return: 新图源的页面后缀
     """
     return another_source.findall(input_content)[0][1:-1]
+
+
+# 一些工具方法 ===========================================================================================================
+def get_img_size(file):
+    try:
+        with Image.open(file) as _img:
+            real_width, real_height = _img.size
+        real_size = os.path.getsize(file) / 1024  # 转化为kb
+        return real_width, real_height, real_size
+    except Exception as e:
+        log(2, file, 'check file failed.')
+        return 0, 0, 0
 
 
 # 记录的方法 ============================================================================================================
@@ -458,7 +461,7 @@ class Gallery:
         self.female_tag = []
         self.misc_tag = []
 
-        self.imgs = []
+        self.imgs = dict()
         self.save_path = ''
 
     def analysis_pages(self, save_path):
@@ -469,8 +472,7 @@ class Gallery:
         :return: 读取的页面内容，可供进一步解析
         """
         log(0, '开始分析作品内容 ================================================================')
-        req = request.Request(self.root_path, headers=gen_headers())
-        _content = request.urlopen(req, timeout=60).read().decode('utf-8')
+        _content = requests.get(self.root_path, headers=gen_headers(), timeout=60).text
 
         # 获取语言和名称，汉化组。中文由于需要寻找汉化组，所以处理方式不一样
         self.language = find_language(_content)
@@ -512,7 +514,7 @@ class Gallery:
         # 解析长度
         self.pages = int(find_pages(_content))
         self.length = int(find_length(_content))
-        log(0, '获取作品长度结束，共:', self.length, '页')
+        log(0, '获取作品长度结束，共:', self.pages, '页面, ', self.length, '页')
         self.posted = find_posted(_content)
 
         self.is_anthology = find_anthology(_content)
@@ -533,19 +535,16 @@ class Gallery:
         for p in find_pics(_content):
             task = ImageDownloadTask(self.root_path, p, self.save_path)
             tasks.append(task)
-            self.imgs.append(task.get_img_info())
-        log(0, '从第1页获取图片列表结束, 当前的图片列表长度:', len(self.imgs))
+        log(0, '从第1页获取图片列表结束, 当前的图片列表长度:', len(tasks))
 
         ref = self.root_path
         for i in range(1, self.pages):
             now_page = self.root_path + '?p=' + str(i)
-            req = request.Request(now_page, headers=gen_headers(ref))
-            tmp = request.urlopen(req, timeout=60).read().decode('utf-8')
+            tmp = requests.get(now_page, headers=gen_headers(ref), timeout=60).text
             for p in find_pics(tmp):
                 task = ImageDownloadTask(self.root_path, p, self.save_path)
                 tasks.append(task)
-                self.imgs.append(task.get_img_info())
-            log(0, '从第' + str(i + 1) + '页获取图片列表结束, 当前的图片列表长度:', len(self.imgs))
+            log(0, '从第' + str(i + 1) + '页获取图片列表结束, 当前的图片列表长度:', len(tasks))
             ref = now_page
         return tasks
 
@@ -633,14 +632,26 @@ class ImageDownloadTask:
         self.page = self.url.split('?')[0].split('-')[-1]
 
         self.try_times = 0  # 重试次数
+        self.img_info = None
+        self.src = None
+        self.ori = None
 
-        self.img_info = ImageInfo(url, self.page)
-        _content = self.img_info.analysis_page(root_path)
+    def gen_image_info(self):
+        """
+        分析当前下载页面的下载信息
+
+        :return: None
+        """
+        info = ImageInfo(self.url, self.page)
+        response = requests.get(self.url, headers=gen_headers(referer=self.root_path), timeout=60)
+        _content = response.text
+        info.width, info.height, info.size = find_img_info(_content)
+        info.width_ori, info.height_ori, info.size_ori = find_original_info(_content)
 
         # 图片下载地址
+        self.img_info = info
         self.src = find_img(_content)
         self.ori = find_original_path(_content)
-        self.img_info.set_name(self.src, self.ori)
 
     def download(self):
         """
@@ -648,7 +659,14 @@ class ImageDownloadTask:
 
         :return: 是否下载成功
         """
-        return self.download_ori() if self.ori else self.download_normal()
+        if not self.img_info:
+            self.gen_image_info()
+
+        file_name = self.download_ori() if self.ori else self.download_normal()
+        if file_name:  # 下载成功
+            self.img_info.download_name = os.path.basename(file_name)  # 设置下载名称
+            return True
+        return False
 
     def download_ori(self):
         """
@@ -657,25 +675,26 @@ class ImageDownloadTask:
         :return: 是否下载成功
         """
         global HAS_403
+
+        self.try_times += 1
+
+        downloaded = self.img_info.check_ori(self.save_path)
+        if downloaded:
+            return downloaded
+
         try:
-            req = request.Request(self.ori, headers=gen_headers(self.src))
-            file_name = self.img_info.check_ori(self.save_path)
-            if not file_name:  # 已经完成了下载
-                return
-            response = request.urlopen(req, timeout=120)
+            response = requests.get(self.ori, headers=gen_headers(self.url), timeout=120)
+            _content = response.content
+            suffix = response.url.split('?')[0].split('.')[-1]
+            file_name = os.path.join(self.save_path, '{:0>3}_ori.{}'.format(self.page, suffix))
             with open(file_name, 'wb') as _file:
-                _content = response.read()
                 _file.write(_content)
-            return True
-        except urllib.error.HTTPError as e:
-            log(2, self.ori + " open url failed.", e)
-            if str(e.code) == '403':
+            return self.img_info.check_ori(self.save_path)
+        except Exception as e:
+            log(2, self.ori, "open url failed.", e)
+            if isinstance(e, urllib.error.HTTPError) and str(e.code) == '403':
                 HAS_403 = True
-            self.try_times += 1
-        except Exception as e:  # 连接超时等其他错误
-            log(2, self.ori + " open url failed.", e)
-            self.try_times += 1
-        return False
+        return None
 
     def download_normal(self):
         """
@@ -683,28 +702,32 @@ class ImageDownloadTask:
 
         :return: 是否成功
         """
-        global HAS_403
+        global HAS_403, wrongGif
+
+        self.try_times += 1
+
+        downloaded = self.img_info.check_normal(self.save_path)
+        if downloaded:
+            return downloaded
+
+        if self.src == wrongGif:  # 此时已发生403
+            HAS_403 = True
+            return None
+
         try:
-            req = request.Request(self.src, headers=gen_headers(self.url))
-            file_name = self.img_info.check_normal(self.save_path)
-            if not file_name:  # 已经完成了下载
-                return
-            response = request.urlopen(req, timeout=120)
+            response = requests.get(self.src, headers=gen_headers(self.url), timeout=120)
+            _content = response.content
+            suffix = self.src.split('.')[-1]
+            file_name = os.path.join(self.save_path, '{:0>3}.{}'.format(self.page, suffix))
             with open(file_name, 'wb') as _file:
-                _content = response.read()
                 _file.write(_content)
-            return True
-        except urllib.error.HTTPError as e:
-            log(2, self.src + " open url failed.", e)
-            if str(e.code) == '403':
-                HAS_403 = True
-            self.try_times += 1
-            self.find_another_src()
+            return self.img_info.check_normal(self.save_path)
         except Exception as e:  # 连接超时等其他错误
-            log(2, self.src + " open url failed.", e)
-            self.try_times += 1
+            log(2, self.src, "open url failed.", e)
+            if str(response.status_code) == '403':
+                HAS_403 = True
             self.find_another_src()
-        return False
+        return None
 
     def find_another_src(self):
         """
@@ -713,17 +736,15 @@ class ImageDownloadTask:
         :return: None
         """
         try:
-            req = request.Request(self.url, headers=gen_headers(referer=self.url))
-            _content = request.urlopen(req, timeout=60).read().decode('utf-8')
-            ano = find_another_img(_content)
+            response = requests.get(self.url, headers=gen_headers(referer=self.url), timeout=60)
+            ano = find_another_img(response.text)
             if '?' not in self.url:  # 第一次查找其他源
                 tmp_url = self.url + '?nl=' + ano
             else:
                 tmp_url = self.url + '&nl=' + ano
 
-            req = request.Request(tmp_url, headers=gen_headers(referer=self.url))
-            _content = request.urlopen(req, timeout=60).read().decode('utf-8')
-            ano_src = find_img(_content)
+            response = requests.get(tmp_url, headers=gen_headers(referer=self.url), timeout=60)
+            ano_src = find_img(response.text)
 
             self.url = tmp_url
             self.src = ano_src
@@ -751,6 +772,7 @@ class ImageInfo:
 
         - url: 图片显示的地址
         - page: 图片页码
+        - download_name: 图片相对地址名称
 
         - name: 文件名，主要包含文件类型信息
         - width: 宽度，从页面获取
@@ -766,94 +788,52 @@ class ImageInfo:
         """
         self.url = url
         self.page = page_no
+        self.download_name = ''
 
-        self.name = ''
         self.width = 0
         self.height = 0
         self.size = 0
 
-        self.name_ori = None
         self.width_ori = 0
         self.height_ori = 0
         self.size_ori = 0
 
-    def analysis_page(self, referer):
-        """
-        解析图片信息，获取图片和原图的大小信息
-
-        :param referer: 需要解析页面地址的header
-        :return: 读取的页面地址
-        """
-        req = request.Request(self.url, headers=gen_headers(referer=referer))
-        _content = request.urlopen(req, timeout=60).read().decode('utf-8')
-        self.width, self.height, self.size = find_img_info(_content)
-        self.width_ori, self.height_ori, self.size_ori = find_original_info(_content)
-        return _content
-
-    def set_name(self, src, src_ori):
-        """
-        设置图片的名称，主要设置后缀名
-
-        :param src: 图片下载地址
-        :param src_ori: 原图下载地址
-        :return: None
-        """
-        src = src.replace('&amp;', '&')
-        suffix = src.split(".")[-1]
-        self.name = '{:0>4}.{}'.format(self.page, suffix)
-
-        if not src_ori:  # 没有原图地址，直接返回
-            return
-
-        src_ori = src_ori.replace('&amp;', '&').split('?')[0]
-        suffix = src_ori.split('.')[-1]
-        self.name_ori = '{:0>4}_ori.{}'.format(self.page, suffix)
-
     def check_ori(self, save_path):
         """
-        检查原图是否下载正确
+        检查原图是否下载正确，对于下载错误的图片，会删除之
 
         :param save_path: 图片存储地址
-        :return: 正确下载则返回None，否则返回文件名
+        :return: 正确下载返回文件名，否则None
         """
-        if not self.name_ori:
-            Exception('Check Error: This file has no original resource!')
-
-        file_name = os.path.join(save_path, self.name_ori)
-        if not os.path.exists(file_name):
-            return file_name
-
-        with Image.open(file_name) as _img:
-            real_width, real_height = _img.size
-            real_size = os.path.getsize(file_name)
-        if self.width_ori != real_width:
-            return file_name
-        if self.height_ori != real_height:
-            return file_name
-        if abs(real_size - self.size_ori) > 10:
-            return file_name
+        files = [os.path.join(save_path, file) for file in glob.glob1(save_path, '{:0>3}_ori.*'.format(self.page))]
+        for file in files:
+            if file.endswith('gif') and os.path.getsize(file) not in [142, 143]:  # 只要不是142,143的gif，则认为其正确
+                return file
+            elif file.endswith('gif') or file.endswith('php'):  # 普通图及原图403后的结果
+                continue
+            else:
+                r_width, r_height, r_size = get_img_size(file)
+                if self.width_ori == r_width and self.height_ori == r_height and abs(r_size - self.size_ori) < 10:
+                    return file
         return None
 
     def check_normal(self, save_path):
         """
-        检查图片是否下载正确
+        检查图片是否下载正确，对于下载错误的图片，会删除之
 
         :param save_path: 图片存储地址
         :return: 正确下载则返回None，否则返回文件名
         """
-        file_name = os.path.join(save_path, self.name)
-        if not os.path.exists(file_name):
-            return file_name
-
-        with Image.open(file_name) as _img:
-            real_width, real_height = _img.size
-            real_size = os.path.getsize(file_name)
-        if self.width != real_width:
-            return file_name
-        if self.height != real_height:
-            return file_name
-        if abs(real_size - self.size) > 10 :
-            return file_name
+        files = [os.path.join(save_path, file) for file in glob.glob1(save_path, '{:0>3}.*'.format(self.page))]
+        for file in files:
+            if file.endswith('gif') and os.path.getsize(file) not in [142, 143]:  # 只要不是142,143的gif，则认为其正确
+                return file
+            elif file.endswith('gif') or file.endswith('php'):  # 普通图及原图403后的结果
+                continue
+            else:
+                r_width, r_height, r_size = get_img_size(file)
+                if self.width == r_width and self.height == r_height and abs(r_size - self.size) < 10:
+                    return file
         return None
 
     def check_all(self, save_path):
@@ -863,9 +843,7 @@ class ImageInfo:
         :param save_path: 保存地址
         :return: 是否完整
         """
-        if self.name_ori:
-            return self.check_ori(save_path)
-        return self.check_normal(save_path)
+        return self.check_ori(save_path) if self.name_ori else self.check_normal(save_path)
 
     def to_dict(self):
         """
@@ -876,16 +854,16 @@ class ImageInfo:
         result = dict()
         result['url'] = self.url
         result['page'] = self.page
+        result['download_name'] = self.download_name
 
-        result['name'] = self.name
         result['width'] = self.width
         result['height'] = self.height
         result['size'] = self.size
 
-        result['name_ori'] = self.name_ori
         result['width_ori'] = self.width_ori
         result['height_ori'] = self.height_ori
         result['size_ori'] = self.size_ori
+        return result
 
     @staticmethod
     def from_dict(dic):
@@ -898,6 +876,7 @@ class ImageInfo:
         result = ImageInfo()
         result.url = dic['url']
         result.page = dic['page']
+        result.download_name = dic['download_name']
 
         result.name = dic['name']
         result.width = dic['width']
@@ -929,6 +908,8 @@ class Dispatcher(threading.Thread):
         self.workers = []
 
     def run(self):
+        global HAS_403
+
         try:
             self.gallery = Gallery(self.root_path)
             tasks = self.gallery.analysis_pages(self.save_path)
@@ -940,7 +921,7 @@ class Dispatcher(threading.Thread):
 
         # 创建worker
         for i in range(self.worker_number):
-            self.workers.append(Worker('Worker' + str(i), self.queue))
+            self.workers.append(Worker('Worker' + str(i), self.queue, self.gallery))
 
         # 开始下载
         self.gallery.mkdir()
@@ -957,11 +938,30 @@ class Dispatcher(threading.Thread):
 
             if self.queue.qsize() < 1 and awake == 0:
                 # 当任务队列结束，并且所有线程都结束时，任务结束
-                self.done = True
                 for worker in self.workers:
                     worker.stop()
-                self.gallery.save_dict()
-                log(0, 'Task Over')
+
+                log(0, 'final check, clean dir')
+                pages = 0
+                for root, dirs, files in os.walk(os.path.join(self.save_path, self.gallery.name)):
+                    for file in files:
+                        if file in self.gallery.imgs:
+                            pages += 1
+                        else:
+                            os.remove(os.path.join(root, file))
+                if pages == self.gallery.length:
+                    self.gallery.save_dict()
+                    log(0, 'check right, task over')
+                else:  # 检查不成功，写一个undone文件标识此为未完成
+                    log(1, 'check fail: expected:', self.gallery.length, ', real: ', str(pages), 'task Over')
+                    with open(os.path.join(self.save_path, 'undone'), 'w', encoding='utf-8') as file:
+                        file.write('undone')
+                self.done = True
+            if HAS_403:  # 出现403则结束任务
+                log(2, '403 happened, stop dispatcher.')
+                for worker in self.workers:
+                    worker.stop()
+                self.done = True
 
             time.sleep(2)
 
@@ -972,11 +972,12 @@ class Worker(threading.Thread):
     下载工作类，即一个线程
     """
 
-    def __init__(self, name, que):
+    def __init__(self, name, que, gall):
         threading.Thread.__init__(self)
         self.name = name
         self.done = False  # 任务是否已完成
         self.queue = que  # 任务队列
+        self.gall = gall
 
     def stop(self):
         """
@@ -999,16 +1000,31 @@ class Worker(threading.Thread):
                     log(0, '403 happened.')
                     self.stop()
                 elif task.download():  # 下载成功
-                    log(0, 'download success. now queue size:', len(self.queue))
+                    log(0, 'download success. page:', '{:0>3}'.format(task.page), 'now queue size:', self.queue.qsize())
+                    img_dic = task.get_img_info()  # 执行下载过程后才会生成图片信息
+                    self.gall.imgs[img_dic['download_name']] = img_dic
                 else:  # 下载失败
                     self.queue.put(task)
-                    log(0, 'download failed. now queue size:', len(self.queue))
+                    log(0, 'download failed. page:', '{:0>3}'.format(task.page), 'now queue size:', self.queue.qsize())
             except queue.Empty:  # empty即取出任务失败，没有任务可用时
                 log(0, self.name, ' done!')
                 self.stop()
 
-
 if __name__ == '__main__':
     connect_to_exhentai('mdlovewho', 'ma199141')
-    dispacher = Dispatcher('https://exhentai.org/g/973249/0492db378f/', r'd:\bbb', 5)
-    dispacher.start()
+    root_path = r'd:\bbb'
+    for gall in os.listdir(root_path):
+        dic = os.path.join(root_path, gall, 'gallery.dic')
+        if os.path.exists(dic):
+            with open(dic, 'rb') as file:
+                d = pickle.load(file)
+            disp = Dispatcher(d['root_path'], root_path, 5)
+            disp.start()
+            while not disp.done:
+                time.sleep(2)
+            if not os.path.exists(os.path.join(root_path, gall, 'undone')):
+                if os.path.exists(dic):
+                    os.remove(dic)
+                os.renames(os.path.join(root_path, gall), os.path.join(r'd:\done', gall))
+            if HAS_403:
+                break
