@@ -102,8 +102,8 @@ misc_detail = re.compile('<div id="td_(\S+?)" .+?</div>')
 # 下载信息: 页码信息, 每页信息, 具体图片地址信息, 图片大小信息, 原图信息, 其他图片页面信息 ==========================================
 pic = re.compile('<a href="(http[s]*://exhentai\.org/s/[^/]+/\d+-\d+)"><img')
 img = re.compile('<div id="i3"><a onclick="[^"]+" href="[^"]+">\s*<img id="img" src="([^"]+)"')
-img_info = re.compile('<div id="i4"><div>[^:]+:: (\d+) x (\d+) :: (\S+) ([KM]*B)</div>')
-original_source = re.compile('<a href="([^"]+)">Download original (\d+) x (\d+) ([\d\.]+) (\S+) source</a>')
+img_info = re.compile('<div id="i4"><div>[^:]+:: (\d+) x (\d+).*?</div>')
+original_source = re.compile('<a href="([^"]+)">Download original (\d+) x (\d+).*?source</a>')
 another_source = re.compile('<a href="#".*?onclick="return nl\(([^\)]+)\)">Click here if the image fails loading</a>')
 
 
@@ -314,13 +314,7 @@ def find_img_info(input_content):
     :return: 图片信息信息
     """
     result = img_info.findall(input_content)[0]
-    if result[3] == 'KB':
-        size = float(result[2])
-    elif result[3] == 'B':
-        size = float(result[2]) / 1024
-    else:
-        size = float(result[2]) * 1024
-    return int(result[0]), int(result[1]), size
+    return int(result[0]), int(result[1])
 
 
 def find_original_info(input_content):
@@ -331,15 +325,9 @@ def find_original_info(input_content):
     """
     ori = original_source.findall(input_content)
     if not ori:
-        return 0, 0, 0
+        return 0, 0
     result = ori[0]
-    if result[4] == 'KB':
-        size = float(result[3])
-    elif result[3] == 'B':
-        size = float(result[3]) / 1024
-    else:
-        size = float(result[3]) * 1024
-    return int(result[1]), int(result[2]), size
+    return int(result[1]), int(result[2])
 
 
 def find_original_path(input_content):
@@ -369,11 +357,10 @@ def get_img_size(file):
     try:
         with Image.open(file) as _img:
             real_width, real_height = _img.size
-        real_size = os.path.getsize(file) / 1024  # 转化为kb
-        return real_width, real_height, real_size
+        return real_width, real_height
     except Exception as e:
         log(2, file, 'check file failed.')
-        return 0, 0, 0
+        return 0, 0
 
 
 # 记录的方法 ============================================================================================================
@@ -645,8 +632,8 @@ class ImageDownloadTask:
         info = ImageInfo(self.url, self.page)
         response = requests.get(self.url, headers=gen_headers(referer=self.root_path), timeout=60)
         _content = response.text
-        info.width, info.height, info.size = find_img_info(_content)
-        info.width_ori, info.height_ori, info.size_ori = find_original_info(_content)
+        info.width, info.height = find_img_info(_content)
+        info.width_ori, info.height_ori = find_original_info(_content)
 
         # 图片下载地址
         self.img_info = info
@@ -659,8 +646,15 @@ class ImageDownloadTask:
 
         :return: 是否下载成功
         """
+        self.try_times += 1
         if not self.img_info:
-            self.gen_image_info()
+            try:
+                self.gen_image_info()
+            except Exception as e:
+                log(2, 'gen image info wrong:', e)
+                self.img_info = None
+                self.find_another_src()
+                return False
 
         file_name = self.download_ori() if self.ori else self.download_normal()
         if file_name:  # 下载成功
@@ -676,8 +670,6 @@ class ImageDownloadTask:
         """
         global HAS_403
 
-        self.try_times += 1
-
         downloaded = self.img_info.check_ori(self.save_path)
         if downloaded:
             return downloaded
@@ -686,6 +678,9 @@ class ImageDownloadTask:
             response = requests.get(self.ori, headers=gen_headers(self.url), timeout=120)
             _content = response.content
             suffix = response.url.split('?')[0].split('.')[-1]
+            if suffix == 'php':  # 此时已发生403
+                HAS_403 = True
+                return None
             file_name = os.path.join(self.save_path, '{:0>3}_ori.{}'.format(self.page, suffix))
             with open(file_name, 'wb') as _file:
                 _file.write(_content)
@@ -704,8 +699,6 @@ class ImageDownloadTask:
         """
         global HAS_403, wrongGif
 
-        self.try_times += 1
-
         downloaded = self.img_info.check_normal(self.save_path)
         if downloaded:
             return downloaded
@@ -714,6 +707,7 @@ class ImageDownloadTask:
             HAS_403 = True
             return None
 
+        response = None
         try:
             response = requests.get(self.src, headers=gen_headers(self.url), timeout=120)
             _content = response.content
@@ -724,7 +718,7 @@ class ImageDownloadTask:
             return self.img_info.check_normal(self.save_path)
         except Exception as e:  # 连接超时等其他错误
             log(2, self.src, "open url failed.", e)
-            if str(response.status_code) == '403':
+            if response and str(response.status_code) == '403':
                 HAS_403 = True
             self.find_another_src()
         return None
@@ -777,12 +771,10 @@ class ImageInfo:
         - name: 文件名，主要包含文件类型信息
         - width: 宽度，从页面获取
         - height: 高度，从页面获取
-        - size: 大小，从页面获取
 
         - name_ori: 原图文件名，主要包含文件类型信息
         - width_ori: 原图宽度，没有原图则设置为0
         - height_ori: 原图高度，没有原图则设置为0
-        - size_ori: 原图大小，没有原图则设置为0
 
         :return: 类型实例
         """
@@ -792,11 +784,9 @@ class ImageInfo:
 
         self.width = 0
         self.height = 0
-        self.size = 0
 
         self.width_ori = 0
         self.height_ori = 0
-        self.size_ori = 0
 
     def check_ori(self, save_path):
         """
@@ -812,8 +802,8 @@ class ImageInfo:
             elif file.endswith('gif') or file.endswith('php'):  # 普通图及原图403后的结果
                 continue
             else:
-                r_width, r_height, r_size = get_img_size(file)
-                if self.width_ori == r_width and self.height_ori == r_height and abs(r_size - self.size_ori) < 10:
+                r_width, r_height = get_img_size(file)
+                if self.width_ori == r_width and self.height_ori == r_height:
                     return file
         return None
 
@@ -831,8 +821,8 @@ class ImageInfo:
             elif file.endswith('gif') or file.endswith('php'):  # 普通图及原图403后的结果
                 continue
             else:
-                r_width, r_height, r_size = get_img_size(file)
-                if self.width == r_width and self.height == r_height and abs(r_size - self.size) < 10:
+                r_width, r_height= get_img_size(file)
+                if self.width == r_width and self.height == r_height:
                     return file
         return None
 
@@ -858,11 +848,9 @@ class ImageInfo:
 
         result['width'] = self.width
         result['height'] = self.height
-        result['size'] = self.size
 
         result['width_ori'] = self.width_ori
         result['height_ori'] = self.height_ori
-        result['size_ori'] = self.size_ori
         return result
 
     @staticmethod
@@ -907,17 +895,24 @@ class Dispatcher(threading.Thread):
         self.done = False
         self.workers = []
 
-    def run(self):
-        global HAS_403
+    def get_basic_info(self):
+        """
+        生成gallery的基本信息
 
+        :return: 是否成功
+        """
         try:
             self.gallery = Gallery(self.root_path)
             tasks = self.gallery.analysis_pages(self.save_path)
             for task in tasks:
                 self.queue.put(task)
+            return True
         except Exception as e:  # 创建出错的话直接返回
             log(2, 'Error in creating gallery:', e)
-            return
+            return False
+
+    def run(self):
+        global HAS_403
 
         # 创建worker
         for i in range(self.worker_number):
@@ -949,13 +944,16 @@ class Dispatcher(threading.Thread):
                             pages += 1
                         else:
                             os.remove(os.path.join(root, file))
+                undone = os.path.join(self.save_path, self.gallery.name, 'undone')
                 if pages == self.gallery.length:
-                    self.gallery.save_dict()
                     log(0, 'check right, task over')
+                    if os.path.exists(undone):
+                        os.remove(undone)
                 else:  # 检查不成功，写一个undone文件标识此为未完成
                     log(1, 'check fail: expected:', self.gallery.length, ', real: ', str(pages), 'task Over')
-                    with open(os.path.join(self.save_path, 'undone'), 'w', encoding='utf-8') as file:
+                    with open(undone, 'w', encoding='utf-8') as file:
                         file.write('undone')
+                self.gallery.save_dict()
                 self.done = True
             if HAS_403:  # 出现403则结束任务
                 log(2, '403 happened, stop dispatcher.')
@@ -1014,12 +1012,43 @@ if __name__ == '__main__':
     connect_to_exhentai('mdlovewho', 'ma199141')
     root_path = r'd:\bbb'
     for gall in os.listdir(root_path):
-        dic = os.path.join(root_path, gall, 'gallery.dic')
+        now = os.path.join(root_path, gall)
+        dic = os.path.join(now, 'gallery.dic')
+        pkl = os.path.join(now, 'gallery.pkl')
         if os.path.exists(dic):
             with open(dic, 'rb') as file:
                 d = pickle.load(file)
-            disp = Dispatcher(d['root_path'], root_path, 5)
-            disp.start()
+            disp = Dispatcher(d['root_path'], root_path, 2)
+            if disp.get_basic_info():
+                new = os.path.join(root_path, disp.gallery.name)
+                if disp.gallery.name != gall:
+                    for file in os.listdir(now):
+                        os.renames(os.path.join(now, file), os.path.join(new, file))
+                    dic = os.path.join(new, 'gallery.dic')
+                disp.start()
+            else:
+                disp.done = True
+            while not disp.done:
+                time.sleep(2)
+            if not os.path.exists(os.path.join(root_path, gall, 'undone')):
+                if os.path.exists(dic):
+                    os.remove(dic)
+                os.renames(os.path.join(root_path, gall), os.path.join(r'd:\done', gall))
+            if HAS_403:
+                break
+        elif os.path.exists(pkl):
+            with open(pkl, 'rb') as file:
+                d = pickle.load(file)
+            disp = Dispatcher(d['root_path'], root_path, 2)
+            if disp.get_basic_info():
+                new = os.path.join(root_path, disp.gallery.name)
+                if disp.gallery.name != gall:
+                    for file in os.listdir(now):
+                        os.renames(os.path.join(now, file), os.path.join(new, file))
+                    dic = os.path.join(new, 'gallery.dic')
+                disp.start()
+            else:
+                disp.done = True
             while not disp.done:
                 time.sleep(2)
             if not os.path.exists(os.path.join(root_path, gall, 'undone')):

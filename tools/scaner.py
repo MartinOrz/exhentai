@@ -1,11 +1,11 @@
 # coding=utf-8
-__author__ = 'mading01'
 
 import os
 import pickle
 import zipfile
 import shutil
 
+__author__ = 'mading01'
 
 def get_path(dst, dic):
     """
@@ -60,9 +60,9 @@ def _zip(path):
 def zipAll(path):
     if not os.path.isdir(path):
         return
-    dic_path = os.path.join(path, 'gallery.dic')
+    dic_path = os.path.join(path, 'gallery.pkl')
     if os.path.exists(dic_path):
-        zip(path)
+        _zip(path)
     else:
         for d in os.listdir(path):
             zipAll(os.path.join(path, d))
@@ -168,7 +168,7 @@ if __name__ == '__main__':
     # # renames(r'e:\comic', r'e:\new')
     # clear_gif(r'd:\bbb')
     # # scan(r'd:\bbb', r'd:\kkk')
-    zipAll(r'd:\bbb')
+    # zipAll(r'e:\right')
     # # path = r'E:\comic'
     # # save_authors(path)
 
@@ -179,3 +179,9 @@ if __name__ == '__main__':
     #     for file in files:
     #         if not file.endswith('zip'):
     #             os.renames(os.path.join(root, file), os.path.join(root, file + '.zip'))
+
+    for root, dirs, files in os.walk(r'e:\comic'):
+        for file in files:
+            if file.endswith('zip'):
+                if not os.path.exists(os.path.join(r'e:\done', file)):
+                    os.renames(os.path.join(root, file), os.path.join(r'e:\done', file))
