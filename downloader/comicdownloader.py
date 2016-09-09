@@ -812,7 +812,7 @@ class ImageInfo:
         检查图片是否下载正确，对于下载错误的图片，会删除之
 
         :param save_path: 图片存储地址
-        :return: 正确下载则返回None，否则返回文件名
+        :return: 正确下载返回文件名，否则None
         """
         files = [os.path.join(save_path, file) for file in glob.glob1(save_path, '{:0>3}.*'.format(self.page))]
         for file in files:
@@ -831,9 +831,9 @@ class ImageInfo:
         在地址下检查所有图片是否下载完成，如果有原图，就检查原图，否则检查普通图片
 
         :param save_path: 保存地址
-        :return: 是否完整
+        :return: 正确下载返回文件名，否则None
         """
-        return self.check_ori(save_path) if self.name_ori else self.check_normal(save_path)
+        return self.check_ori(save_path) if self.width_ori > 0 else self.check_normal(save_path)
 
     def to_dict(self):
         """
@@ -866,15 +866,11 @@ class ImageInfo:
         result.page = dic['page']
         result.download_name = dic['download_name']
 
-        result.name = dic['name']
         result.width = dic['width']
         result.height = dic['height']
-        result.size = dic['size']
 
-        result.name_ori = dic['name_ori']
         result.width_ori = dic['width_ori']
         result.height_ori = dic['height_ori']
-        result.size_ori = dic['size_ori']
         return result
 
 
